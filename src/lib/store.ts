@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { MOCK_PARTS, type Part } from "./mock-data";
-import type { OptimizationConfig, OptimizationResult } from "./nesting";
+import { optimize, type OptimizationConfig, type OptimizationResult } from "./nesting";
 
 export type UploadedFile = {
   name: string;
@@ -18,19 +18,30 @@ export type AppState = {
   result: OptimizationResult | null;
 };
 
+const defaultConfig: OptimizationConfig = {
+  sheetLength: 3000,
+  sheetWidth: 1500,
+  kerf: 3,
+  trim: 10,
+  rotation: true,
+  algorithm: "maxrects",
+};
+
+const initialParts = MOCK_PARTS;
+const initialResult = optimize(initialParts, defaultConfig);
+
 const initial: AppState = {
-  file: null,
-  parsed: false,
-  parts: [],
-  config: {
-    sheetLength: 3000,
-    sheetWidth: 1500,
-    kerf: 3,
-    trim: 10,
-    rotation: true,
-    algorithm: "maxrects",
+  file: {
+    name: "Ganga-Bridge-Fabrication-BOM.xlsx",
+    size: 248_320,
+    type: "xlsx",
+    rows: initialParts.length,
+    materials: 3,
   },
-  result: null,
+  parsed: true,
+  parts: initialParts,
+  config: defaultConfig,
+  result: initialResult,
 };
 
 let state: AppState = initial;
@@ -44,20 +55,25 @@ export const store = {
   get: () => state,
   set(patch: Partial<AppState>) {
     state = { ...state, ...patch };
+    if (patch.parts || patch.config) {
+      state.result = state.parts.length ? optimize(state.parts, state.config) : null;
+    }
     emit();
   },
   loadDemo() {
+    const parts = MOCK_PARTS;
     state = {
       ...state,
       file: {
         name: "Ganga-Bridge-Fabrication-BOM.xlsx",
         size: 248_320,
         type: "xlsx",
-        rows: MOCK_PARTS.length,
-        materials: new Set(MOCK_PARTS.map((p) => p.material)).size,
+        rows: parts.length,
+        materials: new Set(parts.map((p) => p.material)).size,
       },
       parsed: true,
-      parts: MOCK_PARTS,
+      parts,
+      result: optimize(parts, state.config),
     };
     emit();
   },
@@ -66,29 +82,38 @@ export const store = {
     emit();
   },
   parse() {
+    const parts = MOCK_PARTS;
     state = {
       ...state,
       parsed: true,
-      parts: MOCK_PARTS,
+      parts,
       file: state.file ?? {
         name: "Fabrication-BOM.xlsx",
         size: 248_320,
         type: "xlsx",
-        rows: MOCK_PARTS.length,
+        rows: parts.length,
         materials: 3,
       },
+      result: optimize(parts, state.config),
     };
     emit();
   },
   updatePart(id: string, patch: Partial<Part>) {
+    const parts = state.parts.map((p) => (p.id === id ? { ...p, ...patch } : p));
     state = {
       ...state,
-      parts: state.parts.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      parts,
+      result: parts.length ? optimize(parts, state.config) : null,
     };
     emit();
   },
   removePart(id: string) {
-    state = { ...state, parts: state.parts.filter((p) => p.id !== id) };
+    const parts = state.parts.filter((p) => p.id !== id);
+    state = {
+      ...state,
+      parts,
+      result: parts.length ? optimize(parts, state.config) : null,
+    };
     emit();
   },
   reset() {

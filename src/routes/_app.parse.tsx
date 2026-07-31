@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import {
   Search,
   Trash2,
@@ -12,6 +12,8 @@ import {
   Boxes,
   Weight,
   ArrowRight,
+  FileText,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
@@ -35,6 +37,8 @@ import {
 } from "@/components/ui/dialog";
 import { store, useAppState } from "@/lib/store";
 import { partWeight, type Part } from "@/lib/mock-data";
+import { PlateCutDiagramSection } from "@/components/app/plate-cut-diagram";
+import { PdfLayoutReport } from "@/components/app/pdf-layout-report";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/parse")({
@@ -58,11 +62,12 @@ export const Route = createFileRoute("/_app/parse")({
 type SortKey = "item" | "material" | "thickness" | "length" | "width" | "qty" | "weight";
 
 function ParsePage() {
-  const { parts } = useAppState();
+  const { parts, result } = useAppState();
   const [query, setQuery] = useState("");
   const [material, setMaterial] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "item", dir: 1 });
   const [editing, setEditing] = useState<Part | null>(null);
+  const [showPdfModal, setShowPdfModal] = useState(false);
 
   const materials = useMemo(() => [...new Set(parts.map((p) => p.material))], [parts]);
 
@@ -124,31 +129,84 @@ function ParsePage() {
 
   return (
     <PageTransition>
+      {showPdfModal && result && (
+        <PdfLayoutReport result={result} onClose={() => setShowPdfModal(false)} />
+      )}
+
       <PageHeader
         eyebrow="STEP 2"
-        title="Parse results"
-        description="Every extracted line item, validated against plate-cutting rules. Fix flagged rows before nesting."
+        title="Parse Results"
+        description="Validated BOM line items with interactive plate cut diagrams and cutting instructions."
         actions={
-          <Button asChild size="lg">
-            <Link to="/thickness">
-              Thickness groups <ArrowRight />
-            </Link>
-          </Button>
+          <div className="flex items-center gap-3">
+            {result && (
+              <Button
+                size="lg"
+                onClick={() => setShowPdfModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-soft"
+              >
+                <FileText className="mr-1.5 size-4" /> Download / Export PDF
+              </Button>
+            )}
+            <Button asChild size="lg" variant="outline">
+              <Link to="/layouts">
+                View Cut Layouts <ArrowRight className="ml-1.5 size-4" />
+              </Link>
+            </Button>
+          </div>
         }
       />
 
+      {/* Top 4 Metric Stat Cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total parts" value={totalPieces} icon={PackageSearch} hint={`${parts.length} BOM lines`} />
-        <StatCard label="Unique materials" value={materials.length} icon={Boxes} tone="accent" delay={0.05} hint={materials.join(" · ")} />
-        <StatCard label="Plate types" value={thicknesses} icon={Layers3} tone="warning" delay={0.1} hint="Distinct thicknesses" />
-        <StatCard label="Estimated weight" value={weight} suffix=" kg" icon={Weight} tone="success" delay={0.15} hint="Net cut weight" />
+        <StatCard
+          label="Total parts"
+          value={totalPieces.toLocaleString()}
+          icon={PackageSearch}
+          hint={`${parts.length} BOM lines`}
+        />
+        <StatCard
+          label="Unique materials"
+          value={materials.length}
+          icon={Boxes}
+          tone="accent"
+          delay={0.05}
+          hint={materials.join(" · ")}
+        />
+        <StatCard
+          label="Plate types"
+          value={thicknesses}
+          icon={Layers3}
+          tone="warning"
+          delay={0.1}
+          hint="Distinct thicknesses"
+        />
+        <StatCard
+          label="Estimated weight"
+          value={`${Math.round(weight).toLocaleString()} kg`}
+          icon={Weight}
+          tone="success"
+          delay={0.15}
+          hint="Net cut weight"
+        />
+      </div>
+
+      {/* Plate Cutting Diagram Section (What, Where & How to Cut) */}
+      <PlateCutDiagramSection result={result} />
+
+      {/* Followed by the Parsed Line Items Table */}
+      <div className="mt-8 mb-3 flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-lg text-foreground">Extracted BOM Line Items</h3>
+          <p className="text-xs text-muted-foreground">Search, filter, or edit part dimensions before final layout release.</p>
+        </div>
       </div>
 
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.15 }}
-        className="mt-6 overflow-hidden rounded-2xl border bg-card shadow-soft"
+        className="overflow-hidden rounded-2xl border bg-card shadow-soft"
       >
         <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center">
           <div className="relative flex-1">
@@ -173,7 +231,7 @@ function ParsePage() {
               ))}
             </SelectContent>
           </Select>
-          <span className="text-sm text-muted-foreground">{rows.length} rows</span>
+          <span className="text-sm font-medium text-muted-foreground">{rows.length} rows</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -214,7 +272,7 @@ function ParsePage() {
                   )}
                 >
                   <td className="px-4 py-3 font-medium">
-                    <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center gap-2 font-mono text-xs">
                       {p.invalid ? (
                         <AlertTriangle className="size-4 text-destructive" aria-label={p.invalid} />
                       ) : null}
@@ -230,12 +288,12 @@ function ParsePage() {
                   <td className="px-4 py-3 tabular-nums">{p.thickness}</td>
                   <td className="px-4 py-3 tabular-nums">{p.length}</td>
                   <td className="px-4 py-3 tabular-nums">{p.width}</td>
-                  <td className="px-4 py-3 tabular-nums font-medium">{p.qty}</td>
-                  <td className="px-4 py-3 tabular-nums">{partWeight(p).toFixed(1)}</td>
+                  <td className="px-4 py-3 tabular-nums font-bold">{p.qty}</td>
+                  <td className="px-4 py-3 tabular-nums font-mono">{partWeight(p).toFixed(1)}</td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
                       <Button variant="ghost" size="icon" onClick={() => setEditing(p)}>
-                        <Pencil />
+                        <Pencil className="size-4" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -245,7 +303,7 @@ function ParsePage() {
                           toast.success(`${p.item} removed`);
                         }}
                       >
-                        <Trash2 className="text-destructive" />
+                        <Trash2 className="size-4 text-destructive" />
                       </Button>
                     </div>
                   </td>

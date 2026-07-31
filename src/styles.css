@@ -140,7 +140,7 @@
   --success-foreground: oklch(0.16 0.05 150);
   --warning: oklch(0.78 0.16 70.1);
   --warning-foreground: oklch(0.22 0.06 70);
-  --destructive: oklch(0.65 0.22 25.3);
+  --destructive: oklch(0.637 0.237 25.3);
   --destructive-foreground: oklch(0.99 0.004 247.9);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
@@ -217,5 +217,24 @@
   h2,
   h3 {
     letter-spacing: -0.02em;
+  }
+}
+
+/* Strict Print Rules: Exclude everything except the PDF print area */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #pdf-print-area, #pdf-print-area * {
+    visibility: visible !important;
+  }
+  #pdf-print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 20px !important;
+    box-shadow: none !important;
   }
 }

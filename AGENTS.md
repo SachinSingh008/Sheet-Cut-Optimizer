@@ -1,10 +1,8 @@
-<!-- LOVABLE:BEGIN -->
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
-<!-- LOVABLE:END -->
+# SteelNest AI — Developer & Agent Guidelines
+
+## Project Overview
+SteelNest AI is an industrial fabrication planning and plate/profile cut sheet optimization platform developed by 1810 Systems.
+
+## Guidelines
+- Follow standard Git practices. Maintain clean, descriptive commit messages.
+- Preserved clean modular architecture across React frontend and Python FastAPI optimization engine.

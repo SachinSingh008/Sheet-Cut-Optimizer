@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   PieChart,
   Pie,
@@ -18,6 +18,7 @@ import {
 import { FileSpreadsheet, FileText, FileDown, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
+import { PdfLayoutReport } from "@/components/app/pdf-layout-report";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { store, useAppState } from "@/lib/store";
@@ -45,6 +46,7 @@ const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--cha
 
 function ReportsPage() {
   const { parts, result } = useAppState();
+  const [showPdfModal, setShowPdfModal] = useState(false);
 
   const materialData = useMemo(() => {
     const map = new Map<string, number>();
@@ -76,7 +78,7 @@ function ReportsPage() {
   if (!parts.length) {
     return (
       <PageTransition>
-        <PageHeader eyebrow="STEP 6" title="Reports" />
+        <PageHeader eyebrow="STEP 5" title="Reports" />
         <EmptyState
           title="No data to report"
           description="Parse a BOM and run the optimizer to generate material, scrap and purchasing reports."
@@ -86,10 +88,15 @@ function ReportsPage() {
     );
   }
 
-  const download = (kind: string) =>
+  const download = (kind: string) => {
+    if (kind === "PDF" && result) {
+      setShowPdfModal(true);
+      return;
+    }
     toast.success(`${kind} export queued`, {
       description: "Your report will download once backend export is connected.",
     });
+  };
 
   const purchasing = groupByThickness(parts).map((g) => {
     const sheets = result?.sheets.filter((s) => s.thickness === g.thickness).length ?? 0;
@@ -107,18 +114,24 @@ function ReportsPage() {
 
   return (
     <PageTransition>
+      {showPdfModal && result && (
+        <PdfLayoutReport result={result} onClose={() => setShowPdfModal(false)} />
+      )}
+
       <PageHeader
-        eyebrow="STEP 6"
-        title="Reports & exports"
-        description="Shop-floor ready documentation: material summary, scrap analysis and a purchase list per plate thickness."
+        eyebrow="STEP 5"
+        title="Reports & Exports"
+        description="Shop-floor ready documentation: material summary, scrap analysis and printable PDF cut list."
         actions={
           <>
             <Button variant="outline" onClick={() => download("Excel")}>
               <FileSpreadsheet /> Excel
             </Button>
-            <Button variant="outline" onClick={() => download("PDF")}>
-              <FileText /> PDF
-            </Button>
+            {result && (
+              <Button onClick={() => setShowPdfModal(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-soft">
+                <FileText /> Download PDF Report
+              </Button>
+            )}
             <Button variant="outline" onClick={() => download("CSV")}>
               <FileDown /> CSV
             </Button>

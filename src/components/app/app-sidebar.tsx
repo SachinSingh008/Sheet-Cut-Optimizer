@@ -4,7 +4,6 @@ import {
   UploadCloud,
   Table2,
   Layers3,
-  Sparkles,
   Grid2x2Check,
   FileBarChart2,
   Settings2,
@@ -19,7 +18,6 @@ const nav = [
   { to: "/upload", label: "Upload", icon: UploadCloud },
   { to: "/parse", label: "Parse Results", icon: Table2 },
   { to: "/thickness", label: "Thickness Groups", icon: Layers3 },
-  { to: "/optimization", label: "Optimization", icon: Sparkles },
   { to: "/layouts", label: "Cut Layouts", icon: Grid2x2Check },
   { to: "/reports", label: "Reports", icon: FileBarChart2 },
 ] as const;
@@ -71,11 +69,11 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <div className="m-3 rounded-2xl border bg-primary-soft/60 p-4">
-        <p className="text-xs font-semibold text-primary">Session workspace</p>
+        <p className="text-xs font-semibold text-primary">Auto-Optimized Session</p>
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           {parts.length
-            ? `${parts.length} BOM lines loaded${result ? ` · ${result.sheetCount} sheets nested` : ""}. Nothing is stored on our servers.`
-            : "No account needed. Files are processed in your session and never stored."}
+            ? `${parts.length} BOM lines loaded${result ? ` · ${result.sheetCount} sheets nested` : ""}. Nothing stored.`
+            : "No account needed. Files process in your session."}
         </p>
       </div>
     </aside>
