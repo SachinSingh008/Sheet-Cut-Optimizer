@@ -33,46 +33,47 @@ export type PlateTypeConfig = {
   description?: string;
 };
 
+/** Official SAIL / Tata Steel / Jindal Mill Standard Plate Dimensions */
 export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
   {
     id: "chq",
-    name: "Chequered Plate (Floor/Walkway)",
+    name: "Chequered Plate (IS 3502 / IS 2062)",
     abbreviations: ["CHQ", "CHEQ", "CP", "CHEQUERED"],
-    minThickness: 0,
-    maxThickness: 100,
+    minThickness: 2,
+    maxThickness: 12,
     sheetLength: 2500,
     sheetWidth: 1250,
-    description: "Standard industrial floor & tread plates",
+    description: "Anti-skid floor & stair tread plates (SAIL std: 2500 × 1250 mm)",
   },
   {
     id: "ms-thin",
-    name: "Mild Steel Plate (Standard Thin)",
+    name: "Mild Steel Plate (IS 2062 E250A Thin)",
     abbreviations: ["PL", "MS", "IS2062"],
-    minThickness: 0,
+    minThickness: 3,
     maxThickness: 10,
     sheetLength: 3000,
     sheetWidth: 1500,
-    description: "Standard mill MS plates (up to 10mm thk)",
+    description: "Standard thin HR mill plates (SAIL std: 3000 × 1500 mm)",
   },
   {
     id: "ms-heavy",
-    name: "Mild Steel Plate (Heavy Mill)",
+    name: "Mild Steel Heavy Plate (IS 2062 Structural)",
     abbreviations: ["PL", "MS", "IS2062"],
     minThickness: 11,
     maxThickness: 50,
-    sheetLength: 6000,
+    sheetLength: 6300,
     sheetWidth: 2000,
-    description: "Heavy structural plates (12mm to 50mm thk)",
+    description: "Heavy structural bridge plates (SAIL/Jindal std: 6300 × 2000 mm)",
   },
   {
     id: "high-tensile",
-    name: "High Tensile Alloy Plate",
+    name: "High Tensile Alloy Plate (SAILMA 350HI / E350BR)",
     abbreviations: ["SAILMA", "E350BR", "HS"],
-    minThickness: 0,
+    minThickness: 8,
     maxThickness: 100,
-    sheetLength: 6000,
+    sheetLength: 12000,
     sheetWidth: 2500,
-    description: "High strength bridge girder alloy plates",
+    description: "High strength bridge girder plates (SAIL std: 12000 × 2500 mm)",
   },
 ];
 
