@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Ruler, Palette, Globe, Info, Save } from "lucide-react";
 import { PageHeader, PageTransition } from "@/components/app/page-header";
+import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -72,7 +73,7 @@ function SettingsPage() {
       <PageHeader
         eyebrow="PREFERENCES"
         title="Settings"
-        description="Session defaults for this workspace. Nothing leaves your browser — no account, no stored data."
+        description="Session defaults for this workspace. Configure stock plate sizes, Excel abbreviations, and nesting rules."
         actions={
           <Button size="lg" onClick={() => toast.success("Preferences saved for this session")}>
             <Save /> Save preferences
@@ -94,7 +95,7 @@ function SettingsPage() {
               />
             </div>
             <div className="grid gap-2">
-              <Label>Default sheet size</Label>
+              <Label>Default fallback sheet size</Label>
               <Select
                 value={`${config.sheetLength}x${config.sheetWidth}`}
                 onValueChange={(v) => {
@@ -187,6 +188,9 @@ function SettingsPage() {
           </dl>
         </Section>
       </div>
+
+      {/* Plate Types, Abbreviations & Mill Stock Dimensions Inventory */}
+      <PlateTypeInventorySection />
     </PageTransition>
   );
 }
