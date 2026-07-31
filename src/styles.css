@@ -172,6 +172,14 @@
   background-image: var(--gradient-hero);
 }
 
+@utility grid-blueprint {
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--border) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 70%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 0%, black, transparent 75%);
+}
+
 @utility shadow-soft {
   box-shadow: var(--shadow-soft);
 }
