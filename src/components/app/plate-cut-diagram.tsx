@@ -12,20 +12,28 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronRight,
+  ChevronLeft,
   Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { NestedSheet, PlacedPart, OptimizationResult } from "@/lib/nesting";
 
-const COLOR_PALETTE = [
-  "#3b82f6", // Blue
-  "#06b6d4", // Cyan
-  "#10b981", // Emerald
-  "#8b5cf6", // Purple
-  "#f59e0b", // Amber
-  "#ec4899", // Pink
-  "#6366f1", // Indigo
+const LIGHT_COLOR_PALETTE = [
+  "#93c5fd", // Soft Blue
+  "#a5f3fc", // Soft Cyan
+  "#6ee7b7", // Soft Mint / Emerald
+  "#c4b5fd", // Soft Lavender / Purple
+  "#fde047", // Soft Amber / Yellow
+  "#f9a8d4", // Soft Pink
+  "#a5b4fc", // Soft Indigo
 ];
 
 export function PlateCutDiagramSection({ result }: { result: OptimizationResult | null }) {
@@ -40,7 +48,8 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     );
   }
 
-  const currentSheet: NestedSheet = result.sheets[activeSheetIndex] || result.sheets[0];
+  const safeIndex = Math.min(activeSheetIndex, result.sheets.length - 1);
+  const currentSheet: NestedSheet = result.sheets[safeIndex] || result.sheets[0];
 
   // Group part marks placed on this current sheet
   const sheetPartSummary = useMemo(() => {
@@ -62,7 +71,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     let idx = 0;
     for (const p of currentSheet.placed) {
       if (!map.has(p.part.item)) {
-        map.set(p.part.item, COLOR_PALETTE[idx % COLOR_PALETTE.length]);
+        map.set(p.part.item, LIGHT_COLOR_PALETTE[idx % LIGHT_COLOR_PALETTE.length]);
         idx++;
       }
     }
@@ -71,7 +80,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
 
   return (
     <div className="mt-6 space-y-6">
-      {/* Header & Sheet Switcher Tabs */}
+      {/* Header & Sheet Switcher Bar */}
       <div className="rounded-2xl border bg-card p-5 shadow-soft">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
           <div>
@@ -99,37 +108,84 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
           </div>
         </div>
 
-        {/* Sheet Tabs */}
-        <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-          {result.sheets.map((s, idx) => (
-            <button
-              key={s.id}
-              onClick={() => {
-                setActiveSheetIndex(idx);
+        {/* Sheet Selection Row & Quick Dropdown Selector */}
+        <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Scrollable Sheet Button Tabs */}
+          <div className="flex-1 flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-muted-foreground/30 scrollbar-track-transparent">
+            {result.sheets.map((s, idx) => (
+              <button
+                key={s.id}
+                onClick={() => {
+                  setActiveSheetIndex(idx);
+                  setSelectedPartKey(null);
+                }}
+                className={cn(
+                  "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all whitespace-nowrap cursor-pointer shrink-0",
+                  idx === safeIndex
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>Sheet {s.id}</span>
+                <span className={cn(
+                  "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
+                  idx === safeIndex ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                )}>
+                  {s.thickness}mm · {s.utilization.toFixed(0)}% yield
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Jump to Sheet Dropdown Menu for large sheet counts (e.g. 21+ sheets) */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={safeIndex === 0}
+              onClick={() => setActiveSheetIndex((i) => Math.max(0, i - 1))}
+              className="size-9 shrink-0"
+              title="Previous Sheet"
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+
+            <Select
+              value={String(safeIndex)}
+              onValueChange={(val) => {
+                setActiveSheetIndex(Number(val));
                 setSelectedPartKey(null);
               }}
-              className={cn(
-                "flex items-center gap-2 rounded-xl border px-3.5 py-2 text-xs font-semibold transition-all whitespace-nowrap cursor-pointer",
-                idx === activeSheetIndex
-                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                  : "border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"
-              )}
             >
-              <span>Sheet {s.id}</span>
-              <span className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
-                idx === activeSheetIndex ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-              )}>
-                {s.thickness}mm · {s.utilization.toFixed(0)}% yield
-              </span>
-            </button>
-          ))}
+              <SelectTrigger className="w-[200px] h-9 text-xs font-medium">
+                <SelectValue placeholder="Jump to sheet..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                {result.sheets.map((s, idx) => (
+                  <SelectItem key={s.id} value={String(idx)} className="text-xs">
+                    Sheet {s.id} ({s.thickness}mm · {s.utilization.toFixed(0)}% yield)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={safeIndex >= result.sheets.length - 1}
+              onClick={() => setActiveSheetIndex((i) => Math.min(result.sheets.length - 1, i + 1))}
+              className="size-9 shrink-0"
+              title="Next Sheet"
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* SVG Diagram & Cutting Specs Grid */}
       <div className="grid gap-6 xl:grid-cols-12">
-        {/* Left 7 Columns: Visual SVG Plate Cut Diagram */}
+        {/* Left 7 Columns: Visual SVG Plate Cut Diagram (LIGHT MODE CAD STYLING) */}
         <div className="xl:col-span-7 rounded-2xl border bg-card p-5 shadow-soft flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b pb-3 mb-4">
@@ -146,13 +202,13 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
               </span>
             </div>
 
-            {/* Interactive SVG Diagram Box */}
-            <div className="relative rounded-xl border border-dashed border-border bg-slate-950 p-4 overflow-hidden">
+            {/* Interactive SVG Diagram Box — Regular Light Mode Styling */}
+            <div className="relative rounded-xl border border-slate-300 bg-slate-50 p-4 overflow-hidden shadow-inner">
               {/* Scale Dimensions Label Overlay */}
-              <div className="absolute top-2 left-2 z-10 text-[10px] font-mono text-slate-400 bg-slate-900/90 border border-slate-800 px-2 py-0.5 rounded shadow">
+              <div className="absolute top-2 left-2 z-10 text-[10px] font-mono font-medium text-slate-700 bg-white/95 border border-slate-300 px-2 py-0.5 rounded shadow-sm">
                 X: 0 → {currentSheet.sheetLength}mm | Y: 0 → {currentSheet.sheetWidth}mm
               </div>
-              <div className="absolute top-2 right-2 z-10 text-[10px] font-mono text-slate-400 bg-slate-900/90 border border-slate-800 px-2 py-0.5 rounded shadow">
+              <div className="absolute top-2 right-2 z-10 text-[10px] font-mono font-medium text-slate-700 bg-white/95 border border-slate-300 px-2 py-0.5 rounded shadow-sm">
                 Kerf: {result.config.kerf}mm | Trim: {result.config.trim}mm
               </div>
 
@@ -164,27 +220,27 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
               >
                 {/* Background Grid Pattern */}
                 <defs>
-                  <pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse">
-                    <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#334155" strokeWidth="1" opacity="0.4" />
+                  <pattern id="light-grid" width="100" height="100" patternUnits="userSpaceOnUse">
+                    <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#e2e8f0" strokeWidth="1" />
                   </pattern>
                 </defs>
 
-                {/* Stock Plate Outline */}
+                {/* Stock Plate Outline — Clean White Stock Sheet */}
                 <rect
                   x={0}
                   y={0}
                   width={currentSheet.sheetLength}
                   height={currentSheet.sheetWidth}
-                  fill="#020617"
-                  stroke="#475569"
-                  strokeWidth={8}
+                  fill="#ffffff"
+                  stroke="#334155"
+                  strokeWidth={6}
                 />
                 <rect
                   x={0}
                   y={0}
                   width={currentSheet.sheetLength}
                   height={currentSheet.sheetWidth}
-                  fill="url(#grid)"
+                  fill="url(#light-grid)"
                 />
 
                 {/* Edge Trim Allowance Area */}
@@ -194,15 +250,14 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                   width={currentSheet.sheetLength - result.config.trim * 2}
                   height={currentSheet.sheetWidth - result.config.trim * 2}
                   fill="none"
-                  stroke="#e2e8f0"
-                  strokeWidth={3}
-                  strokeDasharray="10 10"
-                  opacity={0.3}
+                  stroke="#94a3b8"
+                  strokeWidth={2.5}
+                  strokeDasharray="8 8"
                 />
 
                 {/* Render Nested Parts */}
                 {currentSheet.placed.map((p) => {
-                  const color = itemColors.get(p.part.item) || "#3b82f6";
+                  const color = itemColors.get(p.part.item) || "#93c5fd";
                   const isSelected = selectedPartKey === p.key;
 
                   return (
@@ -218,23 +273,23 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                         width={p.w}
                         height={p.h}
                         fill={color}
-                        fillOpacity={isSelected ? 0.85 : 0.45}
-                        stroke={isSelected ? "#ffffff" : color}
-                        strokeWidth={isSelected ? 8 : 4}
-                        rx={6}
+                        fillOpacity={isSelected ? 0.95 : 0.75}
+                        stroke={isSelected ? "#0f172a" : "#475569"}
+                        strokeWidth={isSelected ? 6 : 3}
+                        rx={4}
                       />
 
-                      {/* Part Mark Label & Dimensions */}
+                      {/* Part Mark Label & Dimensions (Slate 900 High Contrast Text) */}
                       {p.w > 120 && p.h > 60 ? (
                         <text
                           x={p.x + p.w / 2}
                           y={p.y + p.h / 2 - 6}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#ffffff"
+                          fill="#0f172a"
                           fontSize={Math.min(p.w / 12, p.h / 6, 28)}
                           fontWeight="bold"
-                          fontFamily="monospace"
+                          fontFamily="sans-serif"
                         >
                           {p.part.item}
                         </text>
@@ -245,9 +300,9 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                           y={p.y + p.h / 2 + 16}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#cbd5e1"
+                          fill="#334155"
                           fontSize={Math.min(p.w / 16, p.h / 8, 20)}
-                          fontFamily="monospace"
+                          fontFamily="sans-serif"
                         >
                           {p.w}×{p.h}mm
                         </text>
@@ -268,7 +323,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
               const color = itemColors.get(s.part.item);
               return (
                 <span key={s.part.item} className="inline-flex items-center gap-1.5">
-                  <span className="size-3 rounded-sm" style={{ backgroundColor: color }} />
+                  <span className="size-3 rounded-sm border border-slate-400" style={{ backgroundColor: color }} />
                   <span className="font-semibold text-foreground">{s.part.item}</span>
                   <span className="text-muted-foreground font-mono text-[11px]">
                     ({s.w}×{s.h}mm × {s.qtyOnSheet} pcs)

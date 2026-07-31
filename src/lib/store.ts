@@ -1,6 +1,12 @@
 import { useSyncExternalStore } from "react";
 import { MOCK_PARTS, type Part } from "./mock-data";
-import { optimize, type OptimizationConfig, type OptimizationResult } from "./nesting";
+import {
+  optimize,
+  DEFAULT_PLATE_TYPES,
+  type OptimizationConfig,
+  type OptimizationResult,
+  type PlateTypeConfig,
+} from "./nesting";
 
 export type UploadedFile = {
   name: string;
@@ -25,6 +31,7 @@ const defaultConfig: OptimizationConfig = {
   trim: 10,
   rotation: true,
   algorithm: "maxrects",
+  plateTypes: DEFAULT_PLATE_TYPES,
 };
 
 const initialParts = MOCK_PARTS;
@@ -58,6 +65,39 @@ export const store = {
     if (patch.parts || patch.config) {
       state.result = state.parts.length ? optimize(state.parts, state.config) : null;
     }
+    emit();
+  },
+  addPlateType(pt: PlateTypeConfig) {
+    const currentTypes = state.config.plateTypes ?? DEFAULT_PLATE_TYPES;
+    const updated = [...currentTypes, pt];
+    const newConfig = { ...state.config, plateTypes: updated };
+    state = {
+      ...state,
+      config: newConfig,
+      result: state.parts.length ? optimize(state.parts, newConfig) : null,
+    };
+    emit();
+  },
+  updatePlateType(id: string, patch: Partial<PlateTypeConfig>) {
+    const currentTypes = state.config.plateTypes ?? DEFAULT_PLATE_TYPES;
+    const updated = currentTypes.map((pt) => (pt.id === id ? { ...pt, ...patch } : pt));
+    const newConfig = { ...state.config, plateTypes: updated };
+    state = {
+      ...state,
+      config: newConfig,
+      result: state.parts.length ? optimize(state.parts, newConfig) : null,
+    };
+    emit();
+  },
+  removePlateType(id: string) {
+    const currentTypes = state.config.plateTypes ?? DEFAULT_PLATE_TYPES;
+    const updated = currentTypes.filter((pt) => pt.id !== id);
+    const newConfig = { ...state.config, plateTypes: updated };
+    state = {
+      ...state,
+      config: newConfig,
+      result: state.parts.length ? optimize(state.parts, newConfig) : null,
+    };
     emit();
   },
   loadDemo() {

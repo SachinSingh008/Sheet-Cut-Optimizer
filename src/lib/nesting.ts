@@ -22,6 +22,60 @@ export type NestedSheet = {
   utilization: number;
 };
 
+export type PlateTypeConfig = {
+  id: string;
+  name: string;
+  abbreviations: string[]; // e.g. ["CHQ", "CHEQ", "CP"]
+  minThickness: number;
+  maxThickness: number;
+  sheetLength: number;
+  sheetWidth: number;
+  description?: string;
+};
+
+export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
+  {
+    id: "chq",
+    name: "Chequered Plate (Floor/Walkway)",
+    abbreviations: ["CHQ", "CHEQ", "CP", "CHEQUERED"],
+    minThickness: 0,
+    maxThickness: 100,
+    sheetLength: 2500,
+    sheetWidth: 1250,
+    description: "Standard industrial floor & tread plates",
+  },
+  {
+    id: "ms-thin",
+    name: "Mild Steel Plate (Standard Thin)",
+    abbreviations: ["PL", "MS", "IS2062"],
+    minThickness: 0,
+    maxThickness: 10,
+    sheetLength: 3000,
+    sheetWidth: 1500,
+    description: "Standard mill MS plates (up to 10mm thk)",
+  },
+  {
+    id: "ms-heavy",
+    name: "Mild Steel Plate (Heavy Mill)",
+    abbreviations: ["PL", "MS", "IS2062"],
+    minThickness: 11,
+    maxThickness: 50,
+    sheetLength: 6000,
+    sheetWidth: 2000,
+    description: "Heavy structural plates (12mm to 50mm thk)",
+  },
+  {
+    id: "high-tensile",
+    name: "High Tensile Alloy Plate",
+    abbreviations: ["SAILMA", "E350BR", "HS"],
+    minThickness: 0,
+    maxThickness: 100,
+    sheetLength: 6000,
+    sheetWidth: 2500,
+    description: "High strength bridge girder alloy plates",
+  },
+];
+
 export type OptimizationConfig = {
   sheetLength: number;
   sheetWidth: number;
@@ -29,18 +83,23 @@ export type OptimizationConfig = {
   trim: number;
   rotation: boolean;
   algorithm: string;
+  plateTypes?: PlateTypeConfig[];
 };
 
-export type OptimizationResult = {
-  sheets: NestedSheet[];
-  utilization: number;
-  scrap: number;
-  sheetCount: number;
-  cost: number;
-  savings: number;
-  weight: number;
-  config: OptimizationConfig;
-};
+export function findMatchingPlateType(
+  material: string,
+  thickness: number,
+  plateTypes: PlateTypeConfig[] = DEFAULT_PLATE_TYPES,
+): PlateTypeConfig | null {
+  const matUpper = material.toUpperCase();
+  for (const pt of plateTypes) {
+    const matchesAbbr = pt.abbreviations.some((abbr) => matUpper.includes(abbr.trim().toUpperCase()));
+    if (matchesAbbr && thickness >= pt.minThickness && thickness <= pt.maxThickness) {
+      return pt;
+    }
+  }
+  return null;
+}
 
 /** Shelf (bottom-left) nesting — deterministic and good enough for visualization. */
 export function optimize(parts: Part[], config: OptimizationConfig): OptimizationResult {
@@ -51,13 +110,20 @@ export function optimize(parts: Part[], config: OptimizationConfig): Optimizatio
     buckets.set(key, [...(buckets.get(key) ?? []), p]);
   }
 
+  const activePlateTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
   const sheets: NestedSheet[] = [];
-  const usableL = config.sheetLength - config.trim * 2;
-  const usableW = config.sheetWidth - config.trim * 2;
 
   for (const [key, group] of buckets) {
     const material = key.split("|")[0] ?? "Unknown";
     const thickness = Number(key.split("|")[1] ?? 0);
+
+    // Look up plate type dimensions or use config defaults
+    const matchedPlate = findMatchingPlateType(material, thickness, activePlateTypes);
+    const curSheetLength = matchedPlate ? matchedPlate.sheetLength : config.sheetLength;
+    const curSheetWidth = matchedPlate ? matchedPlate.sheetWidth : config.sheetWidth;
+
+    const usableL = curSheetLength - config.trim * 2;
+    const usableW = curSheetWidth - config.trim * 2;
 
     const queue: Array<{ part: Part; w: number; h: number; rotated: boolean }> = [];
     for (const p of group) {
@@ -92,8 +158,8 @@ export function optimize(parts: Part[], config: OptimizationConfig): Optimizatio
         id: `S${String(sheets.length + 1).padStart(2, "0")}`,
         material,
         thickness,
-        sheetLength: config.sheetLength,
-        sheetWidth: config.sheetWidth,
+        sheetLength: curSheetLength,
+        sheetWidth: curSheetWidth,
         placed: [],
         usedArea: 0,
         utilization: 0,
@@ -110,12 +176,12 @@ export function optimize(parts: Part[], config: OptimizationConfig): Optimizatio
 
     for (const it of queue) {
       let s: NestedSheet = sheet ?? (sheet = newSheet());
-      if (cursorX + it.w > config.sheetLength - config.trim) {
+      if (cursorX + it.w > curSheetLength - config.trim) {
         shelfY += shelfH + config.kerf;
         shelfH = 0;
         cursorX = config.trim;
       }
-      if (shelfY + it.h > config.sheetWidth - config.trim) {
+      if (shelfY + it.h > curSheetWidth - config.trim) {
         sheet = newSheet();
         s = sheet;
       }
@@ -136,7 +202,6 @@ export function optimize(parts: Part[], config: OptimizationConfig): Optimizatio
     sheet = null;
   }
 
-
   for (const s of sheets) {
     s.utilization = (s.usedArea / (s.sheetLength * s.sheetWidth)) * 100;
   }
@@ -145,7 +210,7 @@ export function optimize(parts: Part[], config: OptimizationConfig): Optimizatio
   const usedArea = sheets.reduce((a, s) => a + s.usedArea, 0);
   const utilization = (usedArea / totalArea) * 100;
   const weight = sheets.reduce(
-    (a, s) => a + (s.sheetLength * s.sheetWidth * s.thickness * 7.85e-6),
+    (a, s) => a + s.sheetLength * s.sheetWidth * s.thickness * 7.85e-6,
     0,
   );
   const cost = sheets.reduce((a, s) => {

@@ -38,6 +38,7 @@ import {
 import { store, useAppState } from "@/lib/store";
 import { partWeight, type Part } from "@/lib/mock-data";
 import { PlateCutDiagramSection } from "@/components/app/plate-cut-diagram";
+import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { PdfLayoutReport } from "@/components/app/pdf-layout-report";
 import { cn } from "@/lib/utils";
 
@@ -193,6 +194,9 @@ function ParsePage() {
 
       {/* Plate Cutting Diagram Section (What, Where & How to Cut) */}
       <PlateCutDiagramSection result={result} />
+
+      {/* Plate Types & Excel BOM Abbreviation Stock Size Inventory */}
+      <PlateTypeInventorySection />
 
       {/* Followed by the Parsed Line Items Table */}
       <div className="mt-8 mb-3 flex items-center justify-between">

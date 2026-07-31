@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import { Layers3, ArrowRight, Weight, Hash } from "lucide-react";
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
+import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,12 +57,12 @@ function ThicknessPage() {
     <PageTransition>
       <PageHeader
         eyebrow="STEP 3"
-        title="Thickness groups"
-        description="Parts are bucketed by plate thickness and grade — each bucket is nested onto its own stock plates."
+        title="Thickness Groups & Plate Stock Mapping"
+        description="Parts are bucketed by plate thickness and grade — each bucket is nested onto its own stock plates according to assigned plate type stock sizes."
         actions={
           <Button asChild size="lg">
-            <Link to="/optimization">
-              Configure nesting <ArrowRight />
+            <Link to="/layouts">
+              View Cut Layouts <ArrowRight className="ml-1.5 size-4" />
             </Link>
           </Button>
         }
@@ -110,6 +111,9 @@ function ThicknessPage() {
           </motion.button>
         ))}
       </div>
+
+      {/* Plate Types & Excel Abbreviation Stock Size Management Section */}
+      <PlateTypeInventorySection />
 
       <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
         <DialogContent className="max-w-3xl">
