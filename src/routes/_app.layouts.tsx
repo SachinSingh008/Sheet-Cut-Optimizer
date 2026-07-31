@@ -46,7 +46,9 @@ function LayoutsPage() {
                   <Sparkles className="mr-1.5 size-4" /> Generate Layouts
                 </Button>
               ) : (
-                <Button onClick={() => store.loadDemo()}>Load Demo</Button>
+                <Button asChild size="lg">
+                  <Link to="/upload">Upload Excel BOM</Link>
+                </Button>
               )}
             </div>
           }

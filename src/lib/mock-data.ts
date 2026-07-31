@@ -12,12 +12,20 @@ export type Part = {
 
 const STEEL_DENSITY = 7.85e-6; // kg per mm^3
 
-export function partWeight(p: Part) {
-  return p.length * p.width * p.thickness * STEEL_DENSITY * p.qty;
+export function partWeight(p: Part): number {
+  const l = Number(p?.length) || 0;
+  const w = Number(p?.width) || 0;
+  const t = Number(p?.thickness) || 0;
+  const q = Number(p?.qty) || 0;
+  const val = l * w * t * STEEL_DENSITY * q;
+  return isNaN(val) || !isFinite(val) ? 0 : val;
 }
 
-export function partArea(p: Part) {
-  return (p.length * p.width) / 1_000_000; // m2 (single piece)
+export function partArea(p: Part): number {
+  const l = Number(p?.length) || 0;
+  const w = Number(p?.width) || 0;
+  const val = (l * w) / 1_000_000; // m2
+  return isNaN(val) || !isFinite(val) ? 0 : val;
 }
 
 const rows: Array<Omit<Part, "id">> = [
@@ -68,14 +76,15 @@ export type ThicknessGroup = {
 export function groupByThickness(parts: Part[]): ThicknessGroup[] {
   const map = new Map<number, Part[]>();
   for (const p of parts) {
-    map.set(p.thickness, [...(map.get(p.thickness) ?? []), p]);
+    const t = Number(p.thickness) || 0;
+    map.set(t, [...(map.get(t) ?? []), p]);
   }
   return [...map.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([thickness, items]) => ({
       thickness,
       parts: items,
-      pieces: items.reduce((s, p) => s + p.qty, 0),
+      pieces: items.reduce((s, p) => s + (Number(p.qty) || 0), 0),
       weight: items.reduce((s, p) => s + partWeight(p), 0),
     }));
 }

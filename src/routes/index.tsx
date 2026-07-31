@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
-import { store } from "@/lib/store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -123,14 +122,6 @@ function Landing() {
             <Button variant="ghost" size="sm" asChild className="hidden sm:inline-flex">
               <Link to="/help">Documentation</Link>
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => store.loadDemo()}
-              className="hidden md:inline-flex"
-            >
-              <Sparkles className="size-4 text-primary" /> Load Demo Project
-            </Button>
             <Button asChild size="sm" className="shadow-md">
               <Link to="/dashboard">
                 Open Workbench <ArrowRight className="size-4 ml-1" />
@@ -191,14 +182,6 @@ function Landing() {
                   <Link to="/upload">
                     Upload BOM Spreadsheet <ArrowRight className="ml-2 size-5" />
                   </Link>
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={() => store.loadDemo()}
-                  className="px-6 text-base font-medium"
-                >
-                  <Sparkles className="mr-2 size-4 text-primary" /> Try Sample Bridge Project
                 </Button>
               </motion.div>
 
@@ -391,7 +374,7 @@ function Landing() {
             Start Optimizing Your Fabrication BOMs Today
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-muted-foreground text-sm sm:text-base">
-            No registration required. Load your Excel BOM or try our demo bridge project to generate complete nesting layouts in seconds.
+            No registration required. Load your Excel BOM to generate complete nesting layouts in seconds.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Button size="lg" asChild className="shadow-lg">

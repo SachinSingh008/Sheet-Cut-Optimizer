@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { motion } from "motion/react";
+import { motion } from "framer-motion";
 import {
   ArrowRight,
   Boxes,
@@ -14,7 +14,7 @@ import {
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
 import { StatCard } from "@/components/app/stat-card";
 import { Button } from "@/components/ui/button";
-import { useAppState, store } from "@/lib/store";
+import { useAppState } from "@/lib/store";
 import { groupByThickness, partWeight } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/_app/dashboard")({
@@ -36,7 +36,7 @@ export const Route = createFileRoute("/_app/dashboard")({
 });
 
 const steps = [
-  { to: "/upload", title: "Upload BOM", text: "Excel, CSV, PDF or a scanned drawing.", icon: UploadCloud },
+  { to: "/upload", title: "Upload BOM", text: "Excel or CSV spreadsheet.", icon: UploadCloud },
   { to: "/parse", title: "Review parts", text: "Validate materials, sizes and quantities.", icon: PackageSearch },
   { to: "/optimization", title: "Run nesting", text: "Configure kerf, trim and algorithm.", icon: Sparkles },
   { to: "/layouts", title: "Cut layouts", text: "Inspect every sheet and export.", icon: Layers3 },
@@ -53,25 +53,20 @@ function DashboardPage() {
       <PageHeader
         eyebrow="WORKSPACE OVERVIEW"
         title="Project dashboard"
-        description="Everything about the current nesting session in one place. No account, no storage — close the tab and it's gone."
+        description="Everything about the current nesting session in one place. Upload an Excel BOM file to calculate sheet utilization."
         actions={
           parts.length ? (
             <Button asChild size="lg">
               <Link to="/optimization">
-                Run optimization <ArrowRight />
+                Run optimization <ArrowRight className="ml-1.5 size-4" />
               </Link>
             </Button>
           ) : (
-            <>
-              <Button size="lg" variant="outline" onClick={() => store.loadDemo()}>
-                Load demo project
-              </Button>
-              <Button asChild size="lg">
-                <Link to="/upload">
-                  <UploadCloud /> Upload Excel
-                </Link>
-              </Button>
-            </>
+            <Button asChild size="lg">
+              <Link to="/upload">
+                <UploadCloud className="mr-1.5 size-4" /> Upload Excel BOM
+              </Link>
+            </Button>
           )
         }
       />
@@ -79,10 +74,12 @@ function DashboardPage() {
       {parts.length === 0 ? (
         <EmptyState
           title="No BOM loaded yet"
-          description="Upload a fabrication BOM or load the sample bridge project to explore the full optimization workflow."
+          description="Upload an Excel (.xlsx, .xls) or CSV fabrication bill of materials to start cut optimization."
           action={
-            <Button onClick={() => store.loadDemo()} size="lg">
-              <Sparkles /> Try the demo project
+            <Button asChild size="lg">
+              <Link to="/upload">
+                <UploadCloud className="mr-1.5 size-4" /> Upload Excel BOM
+              </Link>
             </Button>
           }
         />

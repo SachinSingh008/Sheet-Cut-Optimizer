@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_app/thickness")({
 });
 
 function ThicknessPage() {
-  const { parts } = useAppState();
+  const { parts, result } = useAppState();
   const groups = groupByThickness(parts);
   const [open, setOpen] = useState<ThicknessGroup | null>(null);
 
@@ -44,8 +44,12 @@ function ThicknessPage() {
         <PageHeader eyebrow="STEP 3" title="Thickness groups" />
         <EmptyState
           title="No parts to group"
-          description="Parse a BOM to see plates grouped by thickness."
-          action={<Button onClick={() => store.loadDemo()}>Load demo</Button>}
+          description="Upload an Excel BOM to view parts grouped by thickness."
+          action={
+            <Button asChild size="lg">
+              <Link to="/upload">Upload Excel BOM</Link>
+            </Button>
+          }
         />
       </PageTransition>
     );
@@ -69,47 +73,67 @@ function ThicknessPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {groups.map((g, i) => (
-          <motion.button
-            key={g.thickness}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05, duration: 0.4 }}
-            whileHover={{ y: -4 }}
-            onClick={() => setOpen(g)}
-            className="cursor-pointer rounded-2xl border bg-card p-6 text-left shadow-soft transition-shadow hover:shadow-lift"
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-2xl font-semibold tracking-tight">PL {g.thickness} THK</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {g.parts.length} BOM lines · {g.pieces} parts
-                </p>
+        {groups.map((g, i) => {
+          const matchingSheets = result?.sheets.filter((s) => s.thickness === g.thickness) ?? [];
+          const sheetsNeeded = matchingSheets.length;
+
+          return (
+            <motion.button
+              key={g.thickness}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05, duration: 0.4 }}
+              whileHover={{ y: -4 }}
+              onClick={() => setOpen(g)}
+              className="cursor-pointer rounded-2xl border bg-card p-6 text-left shadow-soft transition-shadow hover:shadow-lift"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-2xl font-semibold tracking-tight">PL {g.thickness} THK</p>
+                    {sheetsNeeded > 0 && (
+                      <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-0.5">
+                        {sheetsNeeded} {sheetsNeeded === 1 ? "Sheet Needed" : "Sheets Needed"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {g.parts.length} BOM lines · {g.pieces} parts
+                    {sheetsNeeded > 0 ? ` · ${sheetsNeeded} ${sheetsNeeded === 1 ? "sheet" : "sheets"} required` : ""}
+                  </p>
+                </div>
+                <span className="grid size-11 place-items-center rounded-xl bg-brand-gradient text-primary-foreground">
+                  <Layers3 className="size-5" />
+                </span>
               </div>
-              <span className="grid size-11 place-items-center rounded-xl bg-brand-gradient text-primary-foreground">
-                <Layers3 className="size-5" />
-              </span>
-            </div>
 
-            <div className="mt-5 h-2 overflow-hidden rounded-full bg-muted">
-              <motion.div
-                initial={{ width: 0 }}
-                animate={{ width: `${(g.pieces / maxPieces) * 100}%` }}
-                transition={{ duration: 0.8, delay: 0.15 + i * 0.05 }}
-                className="h-full rounded-full bg-brand-gradient"
-              />
-            </div>
+              <div className="mt-5 h-2 overflow-hidden rounded-full bg-muted">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${(g.pieces / maxPieces) * 100}%` }}
+                  transition={{ duration: 0.8, delay: 0.15 + i * 0.05 }}
+                  className="h-full rounded-full bg-brand-gradient"
+                />
+              </div>
 
-            <div className="mt-5 flex items-center gap-5 text-sm">
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                <Hash className="size-4" /> {g.pieces} pcs
-              </span>
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                <Weight className="size-4" /> {g.weight.toFixed(0)} kg
-              </span>
-            </div>
-          </motion.button>
-        ))}
+              <div className="mt-5 flex items-center justify-between text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <Hash className="size-4" /> {g.pieces} pcs
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                    <Weight className="size-4" /> {g.weight.toFixed(0)} kg
+                  </span>
+                </div>
+                {sheetsNeeded > 0 && (
+                  <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                    {sheetsNeeded} {sheetsNeeded === 1 ? "Sheet" : "Sheets"}
+                  </span>
+                )}
+              </div>
+            </motion.button>
+          );
+        })}
       </div>
 
       {/* Plate Types & Excel Abbreviation Stock Size Management Section */}
@@ -118,7 +142,14 @@ function ThicknessPage() {
       <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>PL {open?.thickness} THK — parts</DialogTitle>
+            <DialogTitle className="flex items-center gap-2.5 flex-wrap">
+              <span>PL {open?.thickness} THK — parts</span>
+              {open && (result?.sheets.filter((s) => s.thickness === open.thickness).length ?? 0) > 0 ? (
+                <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-bold px-2.5 py-0.5">
+                  {result?.sheets.filter((s) => s.thickness === open.thickness).length} {result?.sheets.filter((s) => s.thickness === open.thickness).length === 1 ? "Sheet Needed" : "Sheets Needed"}
+                </span>
+              ) : null}
+            </DialogTitle>
             <DialogDescription>
               {open?.pieces} pieces across {open?.parts.length} BOM lines ·{" "}
               {open?.weight.toFixed(0)} kg

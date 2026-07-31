@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import {
   PieChart,
@@ -81,8 +81,12 @@ function ReportsPage() {
         <PageHeader eyebrow="STEP 5" title="Reports" />
         <EmptyState
           title="No data to report"
-          description="Parse a BOM and run the optimizer to generate material, scrap and purchasing reports."
-          action={<Button onClick={() => store.loadDemo()}>Load demo</Button>}
+          description="Upload an Excel BOM to generate material, scrap and purchasing reports."
+          action={
+            <Button asChild size="lg">
+              <Link to="/upload">Upload Excel BOM</Link>
+            </Button>
+          }
         />
       </PageTransition>
     );

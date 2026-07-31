@@ -15,7 +15,7 @@ import { store, useAppState } from "@/lib/store";
 import { DEFAULT_PLATE_TYPES, type PlateTypeConfig } from "@/lib/nesting";
 
 export function PlateTypeInventorySection() {
-  const { config } = useAppState();
+  const { config, result } = useAppState();
   const plateTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
 
   const [editingItem, setEditingItem] = useState<PlateTypeConfig | null>(null);
@@ -131,12 +131,25 @@ export function PlateTypeInventorySection() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border font-sans">
-            {plateTypes.map((pt) => (
-              <tr key={pt.id} className="hover:bg-muted/40 transition-colors">
-                <td className="px-4 py-3.5 font-semibold text-foreground">
-                  <div>{pt.name}</div>
-                  {pt.description && <span className="text-[11px] text-muted-foreground font-normal">{pt.description}</span>}
-                </td>
+            {plateTypes.map((pt) => {
+              const matchingSheets = result?.sheets.filter((s) => 
+                s.sheetLength === pt.sheetLength && s.sheetWidth === pt.sheetWidth && s.thickness >= pt.minThickness && s.thickness <= pt.maxThickness
+              ) ?? [];
+              const ptSheetsNeeded = matchingSheets.length;
+
+              return (
+                <tr key={pt.id} className="hover:bg-muted/40 transition-colors">
+                  <td className="px-4 py-3.5 font-semibold text-foreground">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{pt.name}</span>
+                      {ptSheetsNeeded > 0 && (
+                        <span className="rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-[11px] font-bold px-2 py-0.5">
+                          {ptSheetsNeeded} {ptSheetsNeeded === 1 ? "Sheet Needed" : "Sheets Needed"}
+                        </span>
+                      )}
+                    </div>
+                    {pt.description && <span className="text-[11px] text-muted-foreground font-normal block mt-0.5">{pt.description}</span>}
+                  </td>
                 <td className="px-4 py-3.5">
                   <div className="flex flex-wrap gap-1.5">
                     {pt.abbreviations.map((code) => (
@@ -179,7 +192,8 @@ export function PlateTypeInventorySection() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+          })}
           </tbody>
         </table>
       </div>
