@@ -1,0 +1,7 @@
+"Layer","Recommendation","Why"
+"Hosting","Render/Railway for MVP, later Kubernetes","Quick deployment now, scalable later."
+"CDN/proxy","Cloudflare","Caching, WAF, SSL, basic rate controls."
+"Containers","Docker","Reproducible deployment."
+"CI/CD","GitHub Actions","Free-tier friendly automation."
+"Background workers","Celery or RQ with Redis","Async optimization and report generation."
+"Observability","Sentry + OpenTelemetry + Prometheus/Grafana later","Error tracking and performance insight."

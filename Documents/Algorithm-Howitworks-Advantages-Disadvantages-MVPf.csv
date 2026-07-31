@@ -1,0 +1,6 @@
+"Algorithm","How it works","Advantages","Disadvantages","MVP fit"
+"Guillotine","Places a part and splits remaining free area with guillotine cuts","Good for guillotine-constrained cutting, simpler remnant modeling","Can produce fragmented space and lower utilization","Good when machine or process requires guillotine-like behavior.deepwiki"
+"Skyline","Maintains a skyline profile and places rectangles along it","Fast and simple, often good for strip-like layouts","Weaker on dense irregular spaces","Useful for speed-first scenarios.deepwiki"
+"MaxRects","Tracks maximal empty rectangles and chooses best fit","Often high utilization and flexible heuristics","Slightly more complex and heavier than Skyline","Best default for plate nesting MVP.deepwiki"
+"Genetic Algorithm","Evolves placement sequences or sheet choices","Can explore broader search space","Complex tuning, longer runtime, non-deterministic","Better for later advanced optimizer layers."
+"Simulated Annealing","Probabilistic improvement over time","Good escape from local minima","Runtime-sensitive, requires careful cooling schedule","Good as post-optimization enhancer later."

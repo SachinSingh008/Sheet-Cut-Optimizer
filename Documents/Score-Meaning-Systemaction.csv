@@ -1,0 +1,5 @@
+"Score","Meaning","System action"
+"0.95-1.00","Highly reliable","Auto-accept"
+"0.80-0.94","Good","Accept, highlight for optional review"
+"0.60-0.79","Weak","Send to review queue"
+"<0.60","Unreliable","Block optimization until corrected"

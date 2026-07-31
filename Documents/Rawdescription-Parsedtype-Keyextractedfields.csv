@@ -1,0 +1,5 @@
+"Raw description","Parsed type","Key extracted fields"
+"PL 6 THK 200 x 300","Plate","thickness=6, width=200, length=300"
+"CHQ.PL 6 THK 560 x 3200","Chequered Plate","thickness=6, width=560, length=3200"
+"ISMC 150x75 1290 LG","ISMC","size=150x75, length=1290"
+"ISMB 200x100 180 LG","ISMB","size=200x100, length=180"
