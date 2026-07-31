@@ -10,33 +10,153 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppHelpRouteImport } from './routes/_app.help'
+import { Route as AppLayoutsRouteImport } from './routes/_app.layouts'
+import { Route as AppOptimizationRouteImport } from './routes/_app.optimization'
+import { Route as AppParseRouteImport } from './routes/_app.parse'
+import { Route as AppReportsRouteImport } from './routes/_app.reports'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppThicknessRouteImport } from './routes/_app.thickness'
+import { Route as AppUploadRouteImport } from './routes/_app.upload'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHelpRoute = AppHelpRouteImport.update({
+  id: '/help',
+  path: '/help',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLayoutsRoute = AppLayoutsRouteImport.update({
+  id: '/layouts',
+  path: '/layouts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOptimizationRoute = AppOptimizationRouteImport.update({
+  id: '/optimization',
+  path: '/optimization',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppParseRoute = AppParseRouteImport.update({
+  id: '/parse',
+  path: '/parse',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsRoute = AppReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppThicknessRoute = AppThicknessRouteImport.update({
+  id: '/thickness',
+  path: '/thickness',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUploadRoute = AppUploadRouteImport.update({
+  id: '/upload',
+  path: '/upload',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/help': typeof AppHelpRoute
+  '/layouts': typeof AppLayoutsRoute
+  '/optimization': typeof AppOptimizationRoute
+  '/parse': typeof AppParseRoute
+  '/reports': typeof AppReportsRoute
+  '/settings': typeof AppSettingsRoute
+  '/thickness': typeof AppThicknessRoute
+  '/upload': typeof AppUploadRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dashboard': typeof AppDashboardRoute
+  '/help': typeof AppHelpRoute
+  '/layouts': typeof AppLayoutsRoute
+  '/optimization': typeof AppOptimizationRoute
+  '/parse': typeof AppParseRoute
+  '/reports': typeof AppReportsRoute
+  '/settings': typeof AppSettingsRoute
+  '/thickness': typeof AppThicknessRoute
+  '/upload': typeof AppUploadRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/help': typeof AppHelpRoute
+  '/_app/layouts': typeof AppLayoutsRoute
+  '/_app/optimization': typeof AppOptimizationRoute
+  '/_app/parse': typeof AppParseRoute
+  '/_app/reports': typeof AppReportsRoute
+  '/_app/settings': typeof AppSettingsRoute
+  '/_app/thickness': typeof AppThicknessRoute
+  '/_app/upload': typeof AppUploadRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/help'
+    | '/layouts'
+    | '/optimization'
+    | '/parse'
+    | '/reports'
+    | '/settings'
+    | '/thickness'
+    | '/upload'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/help'
+    | '/layouts'
+    | '/optimization'
+    | '/parse'
+    | '/reports'
+    | '/settings'
+    | '/thickness'
+    | '/upload'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/_app/dashboard'
+    | '/_app/help'
+    | '/_app/layouts'
+    | '/_app/optimization'
+    | '/_app/parse'
+    | '/_app/reports'
+    | '/_app/settings'
+    | '/_app/thickness'
+    | '/_app/upload'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -48,22 +168,109 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/help': {
+      id: '/_app/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof AppHelpRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/layouts': {
+      id: '/_app/layouts'
+      path: '/layouts'
+      fullPath: '/layouts'
+      preLoaderRoute: typeof AppLayoutsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/optimization': {
+      id: '/_app/optimization'
+      path: '/optimization'
+      fullPath: '/optimization'
+      preLoaderRoute: typeof AppOptimizationRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/parse': {
+      id: '/_app/parse'
+      path: '/parse'
+      fullPath: '/parse'
+      preLoaderRoute: typeof AppParseRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports': {
+      id: '/_app/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AppReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/thickness': {
+      id: '/_app/thickness'
+      path: '/thickness'
+      fullPath: '/thickness'
+      preLoaderRoute: typeof AppThicknessRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/upload': {
+      id: '/_app/upload'
+      path: '/upload'
+      fullPath: '/upload'
+      preLoaderRoute: typeof AppUploadRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppDashboardRoute: typeof AppDashboardRoute
+  AppHelpRoute: typeof AppHelpRoute
+  AppLayoutsRoute: typeof AppLayoutsRoute
+  AppOptimizationRoute: typeof AppOptimizationRoute
+  AppParseRoute: typeof AppParseRoute
+  AppReportsRoute: typeof AppReportsRoute
+  AppSettingsRoute: typeof AppSettingsRoute
+  AppThicknessRoute: typeof AppThicknessRoute
+  AppUploadRoute: typeof AppUploadRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppDashboardRoute: AppDashboardRoute,
+  AppHelpRoute: AppHelpRoute,
+  AppLayoutsRoute: AppLayoutsRoute,
+  AppOptimizationRoute: AppOptimizationRoute,
+  AppParseRoute: AppParseRoute,
+  AppReportsRoute: AppReportsRoute,
+  AppSettingsRoute: AppSettingsRoute,
+  AppThicknessRoute: AppThicknessRoute,
+  AppUploadRoute: AppUploadRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
