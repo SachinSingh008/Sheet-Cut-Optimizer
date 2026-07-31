@@ -1,0 +1,157 @@
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
+import { motion } from "motion/react";
+import { Layers3, ArrowRight, Weight, Hash } from "lucide-react";
+import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { store, useAppState } from "@/lib/store";
+import { groupByThickness, partWeight, type ThicknessGroup } from "@/lib/mock-data";
+
+export const Route = createFileRoute("/_app/thickness")({
+  head: () => ({
+    meta: [
+      { title: "Thickness Groups — AI Steel Cut Optimizer" },
+      {
+        name: "description",
+        content: "Plates grouped by thickness so each stock plate is nested with compatible parts only.",
+      },
+      { property: "og:title", content: "Thickness Groups — AI Steel Cut Optimizer" },
+      {
+        property: "og:description",
+        content: "Plates grouped by thickness so each stock plate is nested with compatible parts only.",
+      },
+    ],
+  }),
+  component: ThicknessPage,
+});
+
+function ThicknessPage() {
+  const { parts } = useAppState();
+  const groups = groupByThickness(parts);
+  const [open, setOpen] = useState<ThicknessGroup | null>(null);
+
+  if (!parts.length) {
+    return (
+      <PageTransition>
+        <PageHeader eyebrow="STEP 3" title="Thickness groups" />
+        <EmptyState
+          title="No parts to group"
+          description="Parse a BOM to see plates grouped by thickness."
+          action={<Button onClick={() => store.loadDemo()}>Load demo</Button>}
+        />
+      </PageTransition>
+    );
+  }
+
+  const maxPieces = Math.max(...groups.map((g) => g.pieces));
+
+  return (
+    <PageTransition>
+      <PageHeader
+        eyebrow="STEP 3"
+        title="Thickness groups"
+        description="Parts are bucketed by plate thickness and grade — each bucket is nested onto its own stock plates."
+        actions={
+          <Button asChild size="lg">
+            <Link to="/optimization">
+              Configure nesting <ArrowRight />
+            </Link>
+          </Button>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {groups.map((g, i) => (
+          <motion.button
+            key={g.thickness}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.4 }}
+            whileHover={{ y: -4 }}
+            onClick={() => setOpen(g)}
+            className="cursor-pointer rounded-2xl border bg-card p-6 text-left shadow-soft transition-shadow hover:shadow-lift"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-2xl font-semibold tracking-tight">PL {g.thickness} THK</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {g.parts.length} BOM lines · {g.pieces} parts
+                </p>
+              </div>
+              <span className="grid size-11 place-items-center rounded-xl bg-brand-gradient text-primary-foreground">
+                <Layers3 className="size-5" />
+              </span>
+            </div>
+
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-muted">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${(g.pieces / maxPieces) * 100}%` }}
+                transition={{ duration: 0.8, delay: 0.15 + i * 0.05 }}
+                className="h-full rounded-full bg-brand-gradient"
+              />
+            </div>
+
+            <div className="mt-5 flex items-center gap-5 text-sm">
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <Hash className="size-4" /> {g.pieces} pcs
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                <Weight className="size-4" /> {g.weight.toFixed(0)} kg
+              </span>
+            </div>
+          </motion.button>
+        ))}
+      </div>
+
+      <Dialog open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>PL {open?.thickness} THK — parts</DialogTitle>
+            <DialogDescription>
+              {open?.pieces} pieces across {open?.parts.length} BOM lines ·{" "}
+              {open?.weight.toFixed(0)} kg
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto rounded-xl border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60">
+                <tr>
+                  {["Item", "Description", "Material", "Size (mm)", "Qty", "Weight"].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-2.5 text-left text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {open?.parts.map((p) => (
+                  <tr key={p.id} className="border-t">
+                    <td className="px-4 py-2.5 font-medium">{p.item}</td>
+                    <td className="px-4 py-2.5 text-muted-foreground">{p.description}</td>
+                    <td className="px-4 py-2.5">{p.material}</td>
+                    <td className="px-4 py-2.5 tabular-nums">
+                      {p.length} × {p.width}
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums">{p.qty}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{partWeight(p).toFixed(1)} kg</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </PageTransition>
+  );
+}
