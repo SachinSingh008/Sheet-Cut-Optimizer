@@ -8,6 +8,7 @@ import { PdfLayoutReport } from "@/components/app/pdf-layout-report";
 import { Button } from "@/components/ui/button";
 import { store, useAppState } from "@/lib/store";
 import { optimize } from "@/lib/nesting";
+import { AdaptiveEngineCard } from "@/components/app/adaptive-engine-card";
 
 export const Route = createFileRoute("/_app/layouts")({
   head: () => ({
@@ -84,6 +85,11 @@ function LayoutsPage() {
           </div>
         }
       />
+
+      {/* Adaptive Optimization Engine BOM Analysis & Decision Logic */}
+      <div className="mt-6">
+        <AdaptiveEngineCard result={result} />
+      </div>
 
       {/* Main Interactive Diagram & Cut Sequence Instructions */}
       <PlateCutDiagramSection result={result} />

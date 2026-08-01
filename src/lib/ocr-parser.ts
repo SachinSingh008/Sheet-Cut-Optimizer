@@ -97,14 +97,14 @@ function adaptiveThreshold(
       const v = gray[y * W + x]!;
       integral [(y + 1) * (W + 1) + (x + 1)] =
         v +
-        integral [y * (W + 1) + (x + 1)] +
-        integral [(y + 1) * (W + 1) + x] -
-        integral [y * (W + 1) + x];
+        integral [y * (W + 1) + (x + 1)]! +
+        integral [(y + 1) * (W + 1) + x]! -
+        integral [y * (W + 1) + x]!;
       integral2[(y + 1) * (W + 1) + (x + 1)] =
         v * v +
-        integral2[y * (W + 1) + (x + 1)] +
-        integral2[(y + 1) * (W + 1) + x] -
-        integral2[y * (W + 1) + x];
+        integral2[y * (W + 1) + (x + 1)]! +
+        integral2[(y + 1) * (W + 1) + x]! -
+        integral2[y * (W + 1) + x]!;
     }
   }
 
@@ -116,14 +116,14 @@ function adaptiveThreshold(
       const y2 = Math.min(H - 1, y + half);
       const count = (x2 - x1 + 1) * (y2 - y1 + 1);
 
-      const sum  = integral [(y2 + 1) * (W + 1) + (x2 + 1)]
-                 - integral [(y1)     * (W + 1) + (x2 + 1)]
-                 - integral [(y2 + 1) * (W + 1) + (x1)]
-                 + integral [(y1)     * (W + 1) + (x1)];
-      const sum2 = integral2[(y2 + 1) * (W + 1) + (x2 + 1)]
-                 - integral2[(y1)     * (W + 1) + (x2 + 1)]
-                 - integral2[(y2 + 1) * (W + 1) + (x1)]
-                 + integral2[(y1)     * (W + 1) + (x1)];
+      const sum  = integral [(y2 + 1) * (W + 1) + (x2 + 1)]!
+                 - integral [(y1)     * (W + 1) + (x2 + 1)]!
+                 - integral [(y2 + 1) * (W + 1) + (x1)]!
+                 + integral [(y1)     * (W + 1) + (x1)]!;
+      const sum2 = integral2[(y2 + 1) * (W + 1) + (x2 + 1)]!
+                 - integral2[(y1)     * (W + 1) + (x2 + 1)]!
+                 - integral2[(y2 + 1) * (W + 1) + (x1)]!
+                 + integral2[(y1)     * (W + 1) + (x1)]!;
 
       const mean   = sum / count;
       const stddev = Math.sqrt(Math.max(0, sum2 / count - mean * mean));

@@ -95,6 +95,16 @@ function SettingsPage() {
               />
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="trim">Clamp Margin / Plate Trim (mm)</Label>
+              <Input
+                id="trim"
+                type="number"
+                step="1"
+                value={config.trim}
+                onChange={(e) => store.set({ config: { ...config, trim: Number(e.target.value) } })}
+              />
+            </div>
+            <div className="grid gap-2">
               <Label>Default fallback sheet size</Label>
               <Select
                 value={`${config.sheetLength}x${config.sheetWidth}`}

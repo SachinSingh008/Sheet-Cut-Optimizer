@@ -19,6 +19,13 @@ import {
   RefreshCw,
   Layers,
   LayoutGrid,
+  Navigation,
+  Zap,
+  Clock,
+  ArrowRight,
+  Sliders,
+  ListOrdered,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { NestedSheet, PlacedPart, OptimizationResult } from "@/lib/nesting";
+import { generateCuttingSequence, type SheetCuttingSequenceResult, type CutType } from "@/lib/cutting-sequence";
 
 const LIGHT_COLOR_PALETTE = [
   "#93c5fd", // Soft Blue
@@ -80,6 +88,22 @@ function computeRemnantOffcuts(sheet: NestedSheet) {
   return offcuts;
 }
 
+/** Format cut type into human readable badge label */
+function formatCutTypeBadge(type: CutType, stage: number) {
+  switch (type) {
+    case "guillotine-rip":
+      return { label: `Stage ${stage} Guillotine Rip`, bg: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20" };
+    case "guillotine-cross":
+      return { label: `Stage ${stage} Guillotine Cross`, bg: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20" };
+    case "continuous-strip":
+      return { label: `Stage ${stage} Continuous Strip`, bg: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" };
+    case "common-wall":
+      return { label: `Stage ${stage} Common Wall`, bg: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" };
+    case "part-contour":
+      return { label: `Stage ${stage} Part Sizing`, bg: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" };
+  }
+}
+
 /** 
  * Single Div Canvas for All Sheets of the Same Thickness Grade
  * Renders all sheets of the same thickness inside a SINGLE div container.
@@ -89,11 +113,13 @@ function ThicknessGroupCanvas({
   sheets,
   result,
   itemColors,
+  showCutSequenceOverlay,
 }: {
   thickness: number;
   sheets: NestedSheet[];
   result: OptimizationResult;
   itemColors: Map<string, string>;
+  showCutSequenceOverlay: boolean;
 }) {
   const [selectedPartKey, setSelectedPartKey] = useState<string | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
@@ -133,7 +159,6 @@ function ThicknessGroupCanvas({
     setZoomScale((s) => Math.max(0.5, Number((s - 0.25).toFixed(2))));
   };
 
-  // Non-passive wheel event listener: Normal scroll pans vertically inside diagram div, Ctrl+Scroll zooms, Shift+Scroll pans horizontally
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -143,14 +168,11 @@ function ThicknessGroupCanvas({
       e.stopPropagation();
 
       if (e.ctrlKey || e.metaKey) {
-        // Ctrl + Scroll: Zoom In / Out
         const delta = e.deltaY < 0 ? 0.15 : -0.15;
         setZoomScale((s) => Math.min(4, Math.max(0.4, Number((s + delta).toFixed(2)))));
       } else if (e.shiftKey) {
-        // Shift + Scroll: Horizontal Pan inside diagram
         setPanOffset((prev) => ({ x: prev.x - e.deltaY, y: prev.y }));
       } else {
-        // Normal Scroll: Vertical Pan top-to-bottom inside diagram div
         setPanOffset((prev) => ({ x: prev.x, y: prev.y - e.deltaY }));
       }
     };
@@ -190,7 +212,7 @@ function ThicknessGroupCanvas({
           </div>
           <button
             onClick={() => setSelectedPartKey(null)}
-            className="text-muted-foreground hover:text-foreground font-bold text-xs"
+            className="text-muted-foreground hover:text-foreground font-bold text-xs cursor-pointer"
           >
             ✕ Clear
           </button>
@@ -275,6 +297,10 @@ function ThicknessGroupCanvas({
             <pattern id={`scrap-hatch-thk-${thickness}`} width="20" height="20" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
               <line x1="0" y1="0" x2="0" y2="20" stroke="#b86f5e" strokeWidth="2" strokeOpacity="0.25" />
             </pattern>
+            {/* CNC Torch Arrow Marker */}
+            <marker id="torch-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#0284c7" />
+            </marker>
           </defs>
 
           {/* Transform Group for Zoom & Pan across ALL sheets of this thickness */}
@@ -285,6 +311,7 @@ function ThicknessGroupCanvas({
             {sheets.map((sheet, sIdx) => {
               const offsetY = sheets.slice(0, sIdx).reduce((sum, s) => sum + s.sheetWidth + spacingY, 0);
               const remnantOffcuts = computeRemnantOffcuts(sheet);
+              const seqResult = generateCuttingSequence(sheet);
 
               return (
                 <g key={sheet.id} transform={`translate(0, ${offsetY})`}>
@@ -308,7 +335,7 @@ function ThicknessGroupCanvas({
                     SHEET {sheet.id} OF {sheets.length} · {sheet.material} · THICKNESS: {sheet.thickness} mm (TOTAL REQ: {sheets.length} {sheets.length === 1 ? "SHEET" : "SHEETS"}) · STOCK SIZE: {sheet.sheetLength.toLocaleString()} × {sheet.sheetWidth.toLocaleString()} mm ({sheet.utilization.toFixed(1)}% yield)
                   </text>
 
-                  {/* Main Stock Plate Fill (10x Lighter Soft Warm Steel Redox Brown) & Border */}
+                  {/* Main Stock Plate Fill & Border */}
                   <rect
                     x={0}
                     y={0}
@@ -499,7 +526,68 @@ function ThicknessGroupCanvas({
                     );
                   })}
 
-                  {/* 3. OUTER BOUNDS FOR THIS SHEET */}
+                  {/* 3. OPTIONAL OVERLAY: CNC CUTTING TORCH VECTOR PATH & ORDERED SEQUENCES (#1, #2...) */}
+                  {showCutSequenceOverlay ? (
+                    <g key="cut-sequence-overlay">
+                      {seqResult.operations.map((op: import("@/lib/cutting-sequence").CuttingOperation, opIdx: number) => {
+                        const prevPt = opIdx > 0 ? seqResult.operations[opIdx - 1]!.endPoint : { x: 0, y: 0 };
+                        const isRapid = op.rapidTraverseDistance > 5;
+
+                        return (
+                          <g key={`op-${op.sequenceNumber}`}>
+                            {/* Rapid Traverse Air-Cut Move (Dashed Line) */}
+                            {isRapid ? (
+                              <line
+                                x1={prevPt.x}
+                                y1={prevPt.y}
+                                x2={op.piercePoint.x}
+                                y2={op.piercePoint.y}
+                                stroke="#e11d48"
+                                strokeWidth={2}
+                                strokeDasharray="4 4"
+                                strokeOpacity={0.7}
+                              />
+                            ) : null}
+
+                            {/* Active Torch Cut Path Line */}
+                            <line
+                              x1={op.piercePoint.x}
+                              y1={op.piercePoint.y}
+                              x2={op.endPoint.x}
+                              y2={op.endPoint.y}
+                              stroke="#0284c7"
+                              strokeWidth={4}
+                              markerEnd="url(#torch-arrow)"
+                            />
+
+                            {/* Pierce Point Badge Marker (#1, #2, #3...) */}
+                            <circle
+                              cx={op.piercePoint.x}
+                              cy={op.piercePoint.y}
+                              r={14}
+                              fill="#0284c7"
+                              stroke="#ffffff"
+                              strokeWidth={2}
+                            />
+                            <text
+                              x={op.piercePoint.x}
+                              y={op.piercePoint.y}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fill="#ffffff"
+                              fontSize={11}
+                              fontWeight="bold"
+                              fontFamily="monospace"
+                            >
+                              {op.sequenceNumber}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  ) : null}
+
+                  {/* 4. OUTER BOUNDS FOR THIS SHEET */}
                   <line
                     x1={0}
                     y1={sheet.sheetWidth + 25}
@@ -556,6 +644,8 @@ function ThicknessGroupCanvas({
 
 export function PlateCutDiagramSection({ result }: { result: OptimizationResult | null }) {
   const [activeThicknessFilter, setActiveThicknessFilter] = useState<number | "all">("all");
+  const [showCutSequenceOverlay, setShowCutSequenceOverlay] = useState(true);
+  const [activeTab, setActiveTab] = useState<"diagram" | "cut-sequence">("diagram");
 
   if (!result || !result.sheets.length) {
     return (
@@ -585,7 +675,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     for (const sheet of result.sheets) {
       for (const p of sheet.placed) {
         if (!map.has(p.part.item)) {
-          map.set(p.part.item, LIGHT_COLOR_PALETTE[idx % LIGHT_COLOR_PALETTE.length]);
+          map.set(p.part.item, LIGHT_COLOR_PALETTE[idx % LIGHT_COLOR_PALETTE.length]!);
           idx++;
         }
       }
@@ -593,9 +683,39 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     return map;
   }, [result.sheets]);
 
+  // Combined cutting sequence stats across all sheets
+  const overallSeqStats = useMemo(() => {
+    let totalCutLength = 0;
+    let totalRapid = 0;
+    let totalPierces = 0;
+    let savedCutLength = 0;
+    let savedPierces = 0;
+    let totalEstimatedTimeSec = 0;
+
+    for (const s of result.sheets) {
+      const seq = generateCuttingSequence(s);
+      totalCutLength += seq.totalCutLength;
+      totalRapid += seq.totalRapidTraverse;
+      totalPierces += seq.totalPierces;
+      savedCutLength += seq.savedCutLength;
+      savedPierces += seq.savedPierces;
+      totalEstimatedTimeSec += seq.totalEstimatedTimeSec;
+    }
+
+    return {
+      totalCutLength,
+      totalRapid,
+      totalPierces,
+      savedCutLength,
+      savedPierces,
+      totalEstimatedTimeSec,
+      estimatedTimeMins: (totalEstimatedTimeSec / 60).toFixed(1),
+    };
+  }, [result.sheets]);
+
   return (
     <div className="mt-6 space-y-6">
-      {/* Header Bar */}
+      {/* Top Controls Header Bar */}
       <div className="rounded-2xl border bg-card p-5 shadow-soft">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
           <div>
@@ -604,21 +724,71 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                 CAD
               </span>
               <h3 className="font-bold text-lg text-foreground">
-                Plate Cutting Diagram & Blueprint
+                Plate Cutting Diagram & CNC Cut Sequence
               </h3>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              All stock sheets of the same thickness rendered in a single interactive canvas view.
+              Production cutting sequence optimized to minimize machine travel and group common cuts.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-xs font-medium">
-            <span className="rounded-lg bg-muted px-3 py-1.5 border">
-              Total Sheets: <strong className="text-foreground font-semibold">{result.sheets.length}</strong>
-            </span>
-            <span className="rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1.5 border border-emerald-500/20">
-              Avg Utilization: <strong className="font-bold">{result.utilization.toFixed(1)}%</strong>
-            </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant={showCutSequenceOverlay ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowCutSequenceOverlay((prev) => !prev)}
+              className="text-xs font-bold"
+            >
+              <Navigation className="mr-1.5 size-3.5" />
+              {showCutSequenceOverlay ? "Hide CNC Cut Path Overlay" : "Show CNC Cut Path (#1, #2...)"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Cutting Sequence KPI Callout Grid */}
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div className="rounded-xl border bg-card p-3 shadow-xs">
+            <div className="flex items-center justify-between text-muted-foreground mb-1">
+              <span>Rapid Traverse</span>
+              <Navigation className="size-3.5 text-rose-500" />
+            </div>
+            <p className="text-base font-extrabold text-foreground font-mono">
+              {(overallSeqStats.totalRapid / 1000).toFixed(1)} m
+            </p>
+            <p className="text-[10px] text-emerald-600 font-semibold mt-0.5">Minimized Machine Air-Cut</p>
+          </div>
+
+          <div className="rounded-xl border bg-card p-3 shadow-xs">
+            <div className="flex items-center justify-between text-muted-foreground mb-1">
+              <span>Saved Cut Distance</span>
+              <Scissors className="size-3.5 text-emerald-500" />
+            </div>
+            <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+              +{(overallSeqStats.savedCutLength / 1000).toFixed(1)} m
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Common & Strip Cuts</p>
+          </div>
+
+          <div className="rounded-xl border bg-card p-3 shadow-xs">
+            <div className="flex items-center justify-between text-muted-foreground mb-1">
+              <span>Total Pierces</span>
+              <Zap className="size-3.5 text-amber-500" />
+            </div>
+            <p className="text-base font-extrabold text-foreground font-mono">
+              {overallSeqStats.totalPierces}
+            </p>
+            <p className="text-[10px] text-emerald-600 font-semibold mt-0.5">-{overallSeqStats.savedPierces} Pierces Saved</p>
+          </div>
+
+          <div className="rounded-xl border bg-card p-3 shadow-xs">
+            <div className="flex items-center justify-between text-muted-foreground mb-1">
+              <span>Machine Time</span>
+              <Clock className="size-3.5 text-sky-500" />
+            </div>
+            <p className="text-base font-extrabold text-foreground font-mono">
+              {overallSeqStats.estimatedTimeMins} mins
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Cut + Traverse + Pierce</p>
           </div>
         </div>
 
@@ -669,7 +839,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
         </div>
       </div>
 
-      {/* RENDER ALL SHEETS OF THE SAME THICKNESS INSIDE A SINGLE CANVAS DIV */}
+      {/* RENDER ALL SHEETS OF THE SAME THICKNESS INSIDE A SINGLE CANVAS DIV & ORDERED CUT LIST */}
       <div className="space-y-8">
         {sheetsByThickness
           .filter(({ thickness }) => activeThicknessFilter === "all" || activeThicknessFilter === thickness)
@@ -693,7 +863,7 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                 </span>
               </div>
 
-              {/* Grid: Left Column = Single Div Canvas for All Sheets of this Thickness, Right Column = Parts Table */}
+              {/* Grid: Left Column = Single Div Canvas for All Sheets of this Thickness, Right Column = Ordered Cut List */}
               <div className="grid gap-6 xl:grid-cols-12">
                 {/* SINGLE DIV CANVAS CONTAINER FOR ALL SHEETS OF THIS THICKNESS */}
                 <div className="xl:col-span-7">
@@ -702,51 +872,66 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                     sheets={sheets}
                     result={result}
                     itemColors={itemColors}
+                    showCutSequenceOverlay={showCutSequenceOverlay}
                   />
                 </div>
 
-                {/* Parts & Machine Parameters Table (Right 5 Columns) */}
+                {/* Ordered Production Cut List Table & CNC Rules (Right 5 Columns) */}
                 <div className="xl:col-span-5 space-y-4">
                   <div className="rounded-xl border bg-card p-4 shadow-sm">
-                    <div className="flex items-center gap-2 border-b pb-2 mb-2">
-                      <FileCheck2 className="size-4 text-primary" />
-                      <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">
-                        Parts Overview ({thickness}mm Grade)
-                      </h4>
+                    <div className="flex items-center justify-between border-b pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <ListOrdered className="size-4 text-primary" />
+                        <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">
+                          Ordered Cut List ({thickness}mm Grade)
+                        </h4>
+                      </div>
+                      <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-600 font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                        Minimized Travel
+                      </span>
                     </div>
-                    <div className="overflow-x-auto max-h-[400px]">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b bg-muted/40 text-muted-foreground text-[11px]">
-                            <th className="px-2 py-1.5 text-left font-semibold">Sheet</th>
-                            <th className="px-2 py-1.5 text-left font-semibold">Mark</th>
-                            <th className="px-2 py-1.5 text-left font-semibold">Length × Breadth</th>
-                            <th className="px-2 py-1.5 text-center font-semibold">Qty</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sheets.flatMap((s) => {
-                            const summary = new Map<string, { part: PlacedPart["part"]; qtyOnSheet: number; w: number; h: number }>();
-                            for (const p of s.placed) {
-                              const existing = summary.get(p.part.item);
-                              if (existing) existing.qtyOnSheet += 1;
-                              else summary.set(p.part.item, { part: p.part, qtyOnSheet: 1, w: p.w, h: p.h });
-                            }
-                            return [...summary.values()].map((item) => ({ sheetId: s.id, ...item }));
-                          }).map((s, idx) => (
-                            <tr key={`${s.sheetId}-${s.part.item}-${idx}`} className="border-b hover:bg-muted/30">
-                              <td className="px-2 py-1.5 font-mono text-muted-foreground font-bold">{s.sheetId}</td>
-                              <td className="px-2 py-1.5 font-mono font-bold text-primary">{s.part.item}</td>
-                              <td className="px-2 py-1.5 font-semibold text-foreground">
-                                {s.w.toLocaleString()} × {s.h.toLocaleString()} mm
-                              </td>
-                              <td className="px-2 py-1.5 text-center font-bold text-emerald-600 dark:text-emerald-400">
-                                {s.qtyOnSheet} pcs
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+
+                    <div className="overflow-y-auto max-h-[420px] space-y-2 pr-1 scrollbar-thin">
+                      {sheets.flatMap((s) => {
+                        const seq = generateCuttingSequence(s);
+                        return seq.operations.map((op: import("@/lib/cutting-sequence").CuttingOperation) => ({ sheetId: s.id, ...op }));
+                      }).map((op) => {
+                        const badge = formatCutTypeBadge(op.segment.type, op.segment.guillotineStage);
+
+                        return (
+                          <div
+                            key={`${op.sheetId}-${op.sequenceNumber}`}
+                            className="rounded-lg border bg-muted/20 p-2.5 hover:bg-muted/40 transition-colors text-xs space-y-1"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="grid size-5 place-items-center rounded bg-primary text-white font-mono font-bold text-[10px]">
+                                  #{op.sequenceNumber}
+                                </span>
+                                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                                  Sheet {op.sheetId}
+                                </span>
+                                <span className={cn("text-[9.5px] font-bold px-1.5 py-0.5 rounded border font-mono", badge.bg)}>
+                                  {badge.label}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[11px] font-bold text-foreground">
+                                {op.cutLength} mm
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                              {op.instruction}
+                            </p>
+
+                            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/50 font-mono">
+                              <span>Pierce: ({op.piercePoint.x}, {op.piercePoint.y})</span>
+                              <span>End: ({op.endPoint.x}, {op.endPoint.y})</span>
+                              <span className="text-rose-500 font-semibold">Traverse: {op.rapidTraverseDistance}mm</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -754,17 +939,19 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
                     <div className="flex items-center gap-2 border-b pb-2">
                       <Scissors className="size-3.5 text-emerald-600 dark:text-emerald-400" />
                       <h5 className="font-bold text-xs text-foreground uppercase tracking-wider">
-                        CNC Cutting Rules
+                        Machine Cutting Parameters
                       </h5>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
                       <div className="rounded-lg border p-2 bg-muted/20">
-                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Kerf Offset</p>
-                        <p className="font-bold text-primary mt-0.5">{result.config.kerf}.0 mm</p>
+                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Torch Cut Speed</p>
+                        <p className="font-bold text-primary mt-0.5">
+                          {Math.round(4500 / Math.sqrt(thickness))} mm/min
+                        </p>
                       </div>
                       <div className="rounded-lg border p-2 bg-muted/20">
-                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Clamp Margin</p>
-                        <p className="font-bold text-foreground mt-0.5">{result.config.trim}.0 mm</p>
+                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Rapid Air Cut</p>
+                        <p className="font-bold text-foreground mt-0.5">18,000 mm/min</p>
                       </div>
                     </div>
                   </div>

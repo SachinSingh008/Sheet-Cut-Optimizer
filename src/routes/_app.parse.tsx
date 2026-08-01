@@ -177,7 +177,7 @@ function ParsePage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Total parts"
-          value={totalPieces.toLocaleString()}
+          value={totalPieces}
           icon={PackageSearch}
           hint={`${parts.length} BOM lines`}
         />
@@ -199,7 +199,8 @@ function ParsePage() {
         />
         <StatCard
           label="Estimated weight"
-          value={`${Math.round(weight).toLocaleString()} kg`}
+          value={Math.round(weight)}
+          suffix=" kg"
           icon={Weight}
           tone="success"
           delay={0.15}

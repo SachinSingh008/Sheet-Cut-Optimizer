@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { store, useAppState } from "@/lib/store";
 import { groupByThickness, MATERIAL_RATE, partWeight } from "@/lib/mock-data";
+import { generateCuttingSequence } from "@/lib/cutting-sequence";
 
 export const Route = createFileRoute("/_app/reports")({
   head: () => ({
@@ -148,6 +149,7 @@ function ReportsPage() {
           <TabsTrigger value="summary">Summary</TabsTrigger>
           <TabsTrigger value="materials">Materials</TabsTrigger>
           <TabsTrigger value="scrap">Scrap</TabsTrigger>
+          <TabsTrigger value="cutting-sequence">Cut Sequence</TabsTrigger>
           <TabsTrigger value="purchasing">Purchasing</TabsTrigger>
           <TabsTrigger value="downloads">Downloads</TabsTrigger>
         </TabsList>
@@ -237,6 +239,27 @@ function ReportsPage() {
             />
           ) : (
             <EmptyState title="No scrap data" description="Run the optimizer first." />
+          )}
+        </TabsContent>
+
+        <TabsContent value="cutting-sequence">
+          {result ? (
+            <ReportTable
+              headers={["Sheet", "Operations", "Torch Cut Length", "Rapid Air Cut", "Common Saved", "Est. Machine Time"]}
+              rows={result.sheets.map((s) => {
+                const seq = generateCuttingSequence(s);
+                return [
+                  s.id,
+                  `${seq.operations.length} cuts`,
+                  `${seq.totalCutLength.toLocaleString()} mm`,
+                  `${seq.totalRapidTraverse.toLocaleString()} mm`,
+                  `+${seq.savedCutLength.toLocaleString()} mm (${seq.savedPierces} pierces saved)`,
+                  `${(seq.totalEstimatedTimeSec / 60).toFixed(1)} mins`,
+                ];
+              })}
+            />
+          ) : (
+            <EmptyState title="No cutting sequence data" description="Run the optimizer first." />
           )}
         </TabsContent>
 

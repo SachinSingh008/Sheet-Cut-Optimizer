@@ -102,8 +102,9 @@ export const SHEET_SIZES = [
 ];
 
 export const ALGORITHMS = [
-  { value: "guillotine", label: "Guillotine (straight cuts)" },
-  { value: "maxrects", label: "MaxRects — best area fit" },
-  { value: "skyline", label: "Skyline bottom-left" },
-  { value: "genetic", label: "AI Genetic nesting (beta)" },
+  { value: "auto", label: "Adaptive Engine (Auto-detects BOM characteristics)" },
+  { value: "skyline", label: "Skyline (Bottom-Left Contour)" },
+  { value: "maxrects", label: "MaxRects (Best Area Fit)" },
+  { value: "guillotine", label: "Guillotine (Straight Shear Cuts)" },
+  { value: "hybrid", label: "Hybrid (Skyline + MaxRects Back-Fill)" },
 ];

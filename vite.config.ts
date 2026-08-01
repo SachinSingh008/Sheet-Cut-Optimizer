@@ -5,7 +5,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 
 // When VERCEL=1 (set automatically by Vercel CI) use the vercel preset,
 // otherwise fall back to the default node-server preset for local dev.
-const preset = process.env.VERCEL ? "vercel" : "node-server";
+const preset = process.env["VERCEL"] ? "vercel" : "node-server";
 
 export default defineConfig({
   resolve: {
@@ -15,8 +15,9 @@ export default defineConfig({
     tanstackStart({
       server: {
         entry: "server",
-        preset,
       },
+      // @ts-ignore — preset is a valid tanstackStart option for Vercel deployment
+      preset,
     }),
     react(),
     tailwindcss(),

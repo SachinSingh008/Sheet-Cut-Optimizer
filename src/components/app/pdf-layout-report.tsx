@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { Printer, Download, FileText, ArrowLeft, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { OptimizationResult, NestedSheet } from "@/lib/nesting";
+import { generateCuttingSequence, type CuttingOperation } from "@/lib/cutting-sequence";
 import { partWeight } from "@/lib/mock-data";
 
 interface PdfLayoutReportProps {
@@ -182,20 +183,8 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                       sheetPanelQtyMap.set(key, (sheetPanelQtyMap.get(key) || 0) + 1);
                     }
 
-                    // Generate Cut Sequence Table data
-                    const cutSequenceList: Array<{ id: number; panel: string; cut: string; resultStr: string }> = [];
-                    let currentWidth = sheet.sheetLength;
-                    let currentHeight = sheet.sheetWidth;
-
-                    sheet.placed.forEach((p, idx) => {
-                      const cutVal = p.rotated ? `y=${p.h}` : `x=${p.w}`;
-                      cutSequenceList.push({
-                        id: idx + 1,
-                        panel: `${currentWidth}×${currentHeight}`,
-                        cut: cutVal,
-                        resultStr: `${p.w}×${p.h} \\ ${idx % 3 === 0 ? "surplus" : "-|-"}`,
-                      });
-                    });
+                    // Generate Production Cut Sequence Table data using cutting-sequence engine
+                    const seqResult = generateCuttingSequence(sheet);
 
                     return (
                       <div key={sheet.id} className="grid grid-cols-12 gap-6 pt-4 border-t border-slate-300 print:break-inside-avoid">
@@ -220,20 +209,24 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                                 <td className="px-2 py-1 text-right font-mono text-slate-900">{Math.round(sheetWastedMm2)} mm² {sheetWaste.toFixed(0)}%</td>
                               </tr>
                               <tr>
-                                <td className="px-2 py-1 text-slate-600 font-medium">Cuts</td>
-                                <td className="px-2 py-1 text-right font-mono text-slate-900">{sheetCuts}</td>
+                                <td className="px-2 py-1 text-slate-600 font-medium">Total Cut Operations</td>
+                                <td className="px-2 py-1 text-right font-mono text-slate-900">{seqResult.operations.length}</td>
                               </tr>
                               <tr>
-                                <td className="px-2 py-1 text-slate-600 font-medium">Cut length</td>
-                                <td className="px-2 py-1 text-right font-mono text-slate-900">{sheetCutLen} mm</td>
+                                <td className="px-2 py-1 text-slate-600 font-medium font-semibold text-slate-800">Total cut length</td>
+                                <td className="px-2 py-1 text-right font-mono text-slate-900 font-bold">{seqResult.totalCutLength.toLocaleString()} mm</td>
                               </tr>
                               <tr>
-                                <td className="px-2 py-1 text-slate-600 font-medium">Panels</td>
+                                <td className="px-2 py-1 text-slate-600 font-medium text-rose-600">Rapid Traverse Air-Cut</td>
+                                <td className="px-2 py-1 text-right font-mono text-rose-600 font-semibold">{seqResult.totalRapidTraverse.toLocaleString()} mm</td>
+                              </tr>
+                              <tr>
+                                <td className="px-2 py-1 text-slate-600 font-medium text-emerald-700">Common / Strip Cut Saved</td>
+                                <td className="px-2 py-1 text-right font-mono text-emerald-700 font-bold">+{seqResult.savedCutLength.toLocaleString()} mm</td>
+                              </tr>
+                              <tr>
+                                <td className="px-2 py-1 text-slate-600 font-medium">Panels Nested</td>
                                 <td className="px-2 py-1 text-right font-mono text-slate-900">{sheet.placed.length}</td>
-                              </tr>
-                              <tr>
-                                <td className="px-2 py-1 text-slate-600 font-medium">Wasted panels</td>
-                                <td className="px-2 py-1 text-right font-mono text-slate-900">{Math.max(1, Math.round(sheet.placed.length * 0.2))}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -256,23 +249,23 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                             </tbody>
                           </table>
 
-                          {/* Table 3: Cut Sequence */}
-                          <table className="w-full text-[10px] border border-slate-300 border-collapse">
+                          {/* Table 3: Ordered Production Cut List */}
+                          <table className="w-full text-[9.5px] border border-slate-300 border-collapse">
                             <thead>
                               <tr className="bg-slate-200 text-slate-800 font-bold border-b border-slate-300">
-                                <th className="px-1.5 py-1 text-left">#</th>
-                                <th className="px-1.5 py-1 text-left">Panel</th>
-                                <th className="px-1.5 py-1 text-left">Cut</th>
-                                <th className="px-1.5 py-1 text-left">Result</th>
+                                <th className="px-1 py-1 text-left">#</th>
+                                <th className="px-1 py-1 text-left">Stage</th>
+                                <th className="px-1 py-1 text-left">Pierce (X,Y)</th>
+                                <th className="px-1 py-1 text-left">Operation Cut Instruction</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200 font-mono">
-                              {cutSequenceList.slice(0, 15).map((row) => (
-                                <tr key={row.id}>
-                                  <td className="px-1.5 py-0.5 font-bold text-slate-700">{row.id}</td>
-                                  <td className="px-1.5 py-0.5 text-slate-800">{row.panel}</td>
-                                  <td className="px-1.5 py-0.5 text-slate-900 font-semibold">{row.cut}</td>
-                                  <td className="px-1.5 py-0.5 text-slate-600 text-[9.5px]">{row.resultStr}</td>
+                              {seqResult.operations.slice(0, 15).map((op: CuttingOperation) => (
+                                <tr key={op.sequenceNumber}>
+                                  <td className="px-1 py-0.5 font-bold text-slate-800">#{op.sequenceNumber}</td>
+                                  <td className="px-1 py-0.5 text-slate-700 font-semibold">Stg {op.segment.guillotineStage}</td>
+                                  <td className="px-1 py-0.5 text-slate-900 font-medium">({op.piercePoint.x},{op.piercePoint.y})</td>
+                                  <td className="px-1 py-0.5 text-slate-600 text-[9px] leading-tight">{op.instruction}</td>
                                 </tr>
                               ))}
                             </tbody>
