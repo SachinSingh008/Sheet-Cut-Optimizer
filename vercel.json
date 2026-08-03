@@ -1,5 +1,11 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "framework": null
+  "outputDirectory": "dist/client",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }

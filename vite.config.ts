@@ -13,11 +13,9 @@ export default defineConfig({
   },
   plugins: [
     tanstackStart({
-      server: {
-        entry: "server",
+      spa: {
+        enabled: true,
       },
-      // @ts-ignore — preset is a valid tanstackStart option for Vercel deployment
-      preset,
     }),
     react(),
     tailwindcss(),

@@ -30,8 +30,8 @@ export type AppState = {
 };
 
 const defaultConfig: OptimizationConfig = {
-  sheetLength: 6000,
-  sheetWidth: 1250,
+  sheetLength: 6300,
+  sheetWidth: 1500,
   kerf: 3,
   trim: 0,
   rotation: true,
@@ -52,13 +52,51 @@ const initial: AppState = {
   progressMessage: "",
 };
 
-let state: AppState = initial;
+const STORAGE_KEY = "steelnest_app_state_v2";
+
+function saveStateToStorage(s: AppState) {
+  if (typeof window === "undefined") return;
+  try {
+    const dataToSave = {
+      file: s.file,
+      parsed: s.parsed,
+      parts: s.parts,
+      rejectedParts: s.rejectedParts,
+      config: s.config,
+      result: s.result,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+  } catch (err) {
+    console.warn("Failed to persist app state to localStorage:", err);
+  }
+}
+
+function loadSavedState(): AppState {
+  if (typeof window === "undefined") return initial;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return initial;
+    const parsed = JSON.parse(raw);
+    return {
+      ...initial,
+      ...parsed,
+      isOptimizing: false,
+      progress: parsed.result ? 100 : 0,
+      progressMessage: parsed.result ? "Optimization complete" : "",
+    };
+  } catch {
+    return initial;
+  }
+}
+
+let state: AppState = loadSavedState();
 const listeners = new Set<() => void>();
 
 let activeWorker: Worker | null = null;
 let activeTaskId = 0;
 
 function emit() {
+  saveStateToStorage(state);
   for (const l of listeners) l();
 }
 
@@ -247,7 +285,7 @@ export const store = {
   },
 
   /** Auto-split an oversized long part into standard sheet segment lengths */
-  splitOversizedPart(rejectedId: string, maxSegmentLength: number = 6000) {
+  splitOversizedPart(rejectedId: string, maxSegmentLength: number = 6300) {
     const itemToSplit = state.rejectedParts.find((r) => r.id === rejectedId);
     if (!itemToSplit) return;
 
@@ -361,6 +399,11 @@ export const store = {
       activeWorker = null;
     }
     activeTaskId++;
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
+    }
     state = initial;
     emit();
   },

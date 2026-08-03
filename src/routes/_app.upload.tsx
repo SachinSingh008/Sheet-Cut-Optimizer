@@ -668,13 +668,13 @@ function UploadPage() {
                                     size="sm"
                                     className="h-7 text-[11px] bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-1"
                                     onClick={() => {
-                                      store.splitOversizedPart(r.id, 6000);
+                                      store.splitOversizedPart(r.id, 6300);
                                       toast.success("Auto-Split Applied!", {
-                                        description: `Split ${r.item} into 6,000mm standard stock segments (3x 6000mm + 1x 2000mm) and moved to nesting.`,
+                                        description: `Split ${r.item} into 6,300mm standard stock segments and moved to nesting.`,
                                       });
                                     }}
                                   >
-                                    <Scissors className="size-3" /> Auto-Split (6m)
+                                    <Scissors className="size-3" /> Auto-Split (6.3m)
                                   </Button>
                                 ) : null}
 

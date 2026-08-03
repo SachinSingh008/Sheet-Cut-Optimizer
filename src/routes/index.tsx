@@ -66,7 +66,7 @@ const features = [
   {
     icon: Gauge,
     title: "Multi-Stock Purchase Advisor",
-    text: "Compare multiple standard sheet sizes (2500×1250, 3000×1500, 6000×1500) and rank procurement options by total cost.",
+    text: "Compare multiple standard sheet sizes (6300×1500 regular, 6000×1250 CHQ, 3000×1500, 2500×1250) and rank procurement options by total cost.",
   },
   {
     icon: ShieldCheck,
