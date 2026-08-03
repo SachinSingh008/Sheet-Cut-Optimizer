@@ -1,159 +1,158 @@
-# SteelNest AI — AI-Powered Plate, Profile & Fabrication Optimization Platform
+# SteelNest AI — Industrial Plate & Profile Cut Sheet Optimization Platform
 
-> **Powered by 1810 Systems**
+> **Enterprise Fabrication Planning & 2D/1D Cut Sheet Optimization Engine — Powered by 1810 Systems**
 
-SteelNest AI is an industrial fabrication planning and plate/profile cut-sheet optimization engine. It transforms raw structured engineering bills of materials (BOMs from Excel, CSV, AutoCAD, Tekla, or ERP exports) into machine-feasible cutting layouts, multi-stock procurement recommendations, utilization analytics, and production-ready reports.
+![SteelNest AI Executive Workbench](Assets/main%20screen.png)
 
 ---
 
-## 🎯 Key Capabilities
+## 🌟 Executive Summary
 
-* **Digital BOM Ingestion:** Import `.xlsx`, `.xls`, `.csv`, and ERP exports directly. Preserves row lineage and raw attributes.
-* **Deterministic Regex & Token Parsing:** Extracts part mark, material family, thickness, length, width, profile size (e.g. `PL 6 THK 200x300`, `ISMC 150x75`), grade, and rotation policies automatically.
-* **Confidence Scoring & Review Queue:** Scores parsed line items from $0.0$ to $1.0$. Auto-accepts high-confidence rows and routes low-confidence/ambiguous items to an inline review queue.
-* **Duplicate Merging:** Automatically merges identical and semantic duplicate parts (matching material, thickness, grade, dimensions) while maintaining source row traceability.
-* **2D Plate & 1D Profile Optimization Engine:**
-  * **2D Sheet Nesting:** Uses `rectpack` (MaxRects & Guillotine heuristics) with configurable kerf, edge trim allowance, sheet margins, and orientation/grain rotation constraints.
-  * **1D Linear Cutting:** Cut-to-length optimization for channels (`ISMC`), beams (`ISMB`), angles, flats, and pipes.
-* **Multi-Stock Procurement Advisor:** Compares multiple stock plate sizes (e.g. $2500 \times 1250$, $3000 \times 1500$, $6000 \times 1500$ mm) and ranks options by total material cost, yield %, scrap weight, and sheet count.
-* **Interactive Canvas Visualizer:** Zoomable and draggable layout viewer displaying part labels, rotation status, kerf gaps, and scrap zones per sheet.
-* **Multi-Format Export Packets:** Generates Excel workbooks, PDF summary packets, CSV cut lists, and JSON API payloads.
+**SteelNest AI** is a state-of-the-art industrial fabrication planning and plate/profile cut-sheet optimization platform developed by **1810 Systems**. Built specifically for steel fabricators, EPC contractors, and CNC cutting facilities, SteelNest AI transforms raw engineering Bills of Materials (BOMs from Excel, CSV, AutoCAD, Tekla, or ERP systems) into production-ready cut sheet layouts, kerf-optimized CNC torch paths, remnant management reports, and multi-stock procurement plans.
+
+---
+
+## 🖼️ Application Feature Showcase
+
+### 1. Executive Operations Workbench
+An all-in-one command center providing instant visibility into active projects, raw BOM parsing health, material stock availability, global scrap percentages, and cutting efficiency KPIs.
+
+![Executive Operations Workbench](Assets/main%20screen.png)
+
+---
+
+### 2. Multi-Format BOM Ingestion & Document Parser
+Drag-and-drop ingestion supporting `.xlsx`, `.csv`, PDF, and engineering drawings. Features intelligent Regex parsing, confidence scoring, duplicate part detection, and automatic row attribute extraction.
+
+![BOM Ingestion & Document Parser](Assets/upload%20screen.png)
+
+---
+
+### 3. Material & Thickness Grouping Queue
+Automatically categorizes incoming line items by material grade (e.g., IS 2062 E250/E350) and plate thickness (e.g., 6mm, 10mm, 12mm, 20mm), isolating production buckets for batch optimization.
+
+![Thickness & Material Grouping Queue](Assets/grouping.png)
+
+---
+
+### 4. 2D Sheet & Remnant Optimization Engine
+High-yield layout generator combining Genetic Algorithms, MaxRects, Skyline, and Guillotine packing heuristics. Delivers up to 92%+ material yield while scoring usable offcuts for shop-floor reuse.
+
+![Optimization Yield & Remnant Analysis](Assets/result%20layoout.png)
+
+---
+
+### 5. Interactive CNC Torch Path & Sequence Visualizer
+Real-time SVG/Canvas preview displaying ordered CNC torch cutting sequences, common wall sharing, rapid travel vector paths, and torch lift counts to minimize shop-floor machine wear.
+
+![Interactive CNC Torch Path Visualizer](Assets/cut%20layout.png)
+
+---
+
+### 6. Multi-Sheet Nesting & Layout Management
+Manage complex multi-sheet jobs with instant sheet-by-sheet switching, part highlight inspection, grain orientation indicators, and individual scrap breakdown metrics.
+
+![Multi-Sheet Nesting Workbench](Assets/cutlayout%202.png)
+
+---
+
+### 7. Automated Procurement & Production Reports
+Generate shop-ready PDF cut packets, Excel procurement workbooks, CNC cut sequence tables, and executive summary reports ready for shop-floor deployment and purchasing teams.
+
+![Automated Fabrication & Procurement Reports](Assets/reports.png)
+
+---
+
+### 8. Custom Stock Sizes & Optimization Presets
+Flexible configuration center for defining custom raw stock plate sizes (e.g. $6300 \times 1500$, $6000 \times 1250$, $2500 \times 1250$ mm), kerf gap width, sheet margins, and strategy speed presets.
+
+![Custom Stock Sizes & Strategy Configuration](Assets/Settings.png)
+
+---
+
+### 9. Industrial Knowledge Base & Support
+Integrated documentation and assistance hub equipped with technical guides, cutting sequence rules, remnant classification standards, and nesting strategy references.
+
+![Industrial Help Center](Assets/help%20center.png)
+
+---
+
+## 🎯 Key Technical Capabilities
+
+* **Digital BOM Ingestion:** Imports `.xlsx`, `.csv`, PDF, and ERP exports while preserving line-item lineage.
+* **Deterministic Regex Parsing:** Automatically extracts part marks, material grades, thickness, dimensions, and rotation policies.
+* **Confidence Scoring & Queue:** Assigns parsing confidence scores ($0.0 - 1.0$) and routes ambiguous lines to an inline editing queue.
+* **Hybrid Optimization Solvers:** Features Genetic Evolutionary Algorithms, MaxRects, Skyline, and Guillotine solvers with kerf, margin, and grain constraints.
+* **1D Linear Cutting:** Cut-to-length solver for structural profiles including channels (`ISMC`), beams (`ISMB`), angles, flats, and pipes.
+* **CNC Path Minimization:** Shared-wall common cut detection and pathfinding to reduce torch travel time by up to 35%.
+* **Remnant Quality Indexing:** Evaluates offcuts for dimensional reusability, reducing scrap weight and inventory wastage.
 
 ---
 
 ## 🏗️ System Architecture
 
 ```
-                                  [ User Workspace ]
-                                          │
-                                 (Excel / CSV / BOM)
-                                          │
-                                          ▼
+                                  [ User BOM Source ]
+                                           │
+                                  (Excel / CSV / PDF)
+                                           │
+                                           ▼
                          ┌─────────────────────────────────┐
-                         │   Ingestion & Column Mapper    │
+                         │   Ingestion & Document Parser   │
                          └─────────────────────────────────┘
-                                          │
-                                          ▼
+                                           │
+                                           ▼
                          ┌─────────────────────────────────┐
-                         │   Regex Normalizer & Parser     │
+                         │   Regex Normalizer & Bucketizer │
                          └─────────────────────────────────┘
-                                          │
-                                ┌─────────┴─────────┐
-                                ▼                   ▼
-                       [ Review Queue ]    [ Canonical Parts ]
-                                                    │
-                                                    ▼
-                         ┌─────────────────────────────────┐
-                         │   Duplicate Detector & Merge    │
-                         └─────────────────────────────────┘
-                                          │
-                                          ▼
+                                           │
+                                 ┌─────────┴─────────┐
+                                 ▼                   ▼
+                        [ Review Queue ]    [ Canonical Parts ]
+                                                     │
+                                                     ▼
                          ┌─────────────────────────────────┐
                          │   Optimization Engine           │
-                         │   - 2D rectpack MaxRects        │
-                         │   - 1D Best-Fit Decreasing      │
+                         │   - Population-Based GA         │
+                         │   - MaxRects & Guillotine 2D    │
+                         │   - 1D Linear Profile Solver    │
                          └─────────────────────────────────┘
-                                          │
-                                          ▼
+                                           │
+                                           ▼
                          ┌─────────────────────────────────┐
-                         │  Multi-Stock Purchase Advisor   │
+                         │   Multi-Stock Purchase Advisor  │
                          └─────────────────────────────────┘
-                                          │
-                                ┌─────────┴─────────┐
-                                ▼                   ▼
-                       [ Canvas Visualizer ]   [ Multi-Format Reports ]
+                                           │
+                                 ┌─────────┴─────────┐
+                                 ▼                   ▼
+                        [ Canvas Visualizer ]   [ Executive Reports ]
 ```
 
 ---
 
 ## 🛠️ Technology Stack
 
-* **Frontend:** React 19, TypeScript, Vite 8, TanStack Router, TanStack Query, TailwindCSS v4, Radix UI, Lucide React, Framer Motion
-* **Backend Engine:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.0, rectpack, Polars / Pandas, OpenPyXL, ReportLab / WeasyPrint
-* **Database & Storage:** PostgreSQL / SQLite, Redis, Celery worker queue
-
----
-
-## 📁 Repository Structure
-
-```
-Sheet-Cut-Optimizer/
-├── Documents/               # Product Requirements, System Blueprint, Architecture & Workflow specs
-├── public/                  # Static web assets & icons
-├── src/
-│   ├── components/
-│   │   ├── app/            # Topbar, Sidebar, Page Headers, Stat Cards, Sheet Viewer
-│   │   ├── brand/          # Logo & 1810 Systems branding components
-│   │   └── ui/             # Radix & Tailwind design system UI components
-│   ├── lib/                # Store, mock data engine, and utility functions
-│   ├── routes/             # TanStack Router file-based application routes
-│   │   ├── _app.dashboard.tsx
-│   │   ├── _app.upload.tsx
-│   │   ├── _app.parse.tsx
-│   │   ├── _app.thickness.tsx
-│   │   ├── _app.optimization.tsx
-│   │   ├── _app.layouts.tsx
-│   │   └── _app.reports.tsx
-│   ├── router.tsx
-│   ├── server.ts
-│   └── styles.css
-├── package.json             # Frontend dependencies & scripts
-├── tsconfig.json
-├── vite.config.ts
-└── README.md
-```
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-* **Node.js**: `v20.0.0` or higher (or `bun` / `pnpm` / `npm`)
-* **Python**: `3.11+` (for backend optimization engine)
-
-### 1. Frontend Web Workbench
-
-Install frontend dependencies:
-```bash
-npm install
-```
-
-Start the Vite development server:
-```bash
-npm run dev
-```
-
-Open your browser at `http://localhost:5173`.
-
-### 2. Backend Engine (FastAPI & rectpack)
-
-Set up Python virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install fastapi uvicorn pydantic rectpack pandas openpyxl
-```
-
-Run the backend server:
-```bash
-uvicorn apps.api.app.main:app --reload --port 8000
-```
+| Layer | Technologies & Frameworks |
+| :--- | :--- |
+| **Frontend UI** | React 19, TypeScript, Vite 8, TanStack Router, TanStack Query, TailwindCSS v4, Radix UI, Framer Motion |
+| **Optimization Core** | Multi-threaded Web Workers, Python FastAPI Engine, `rectpack`, Polars / Pandas, ReportLab |
+| **Visualization** | Interactive SVG / HTML5 Canvas Engine with dynamic CNC path rendering |
+| **Reporting** | Automated PDF ReportLab Generator, OpenPyXL Excel Exporter |
 
 ---
 
 ## 📄 Documentation Index
 
-Refer to the `/Documents` directory for in-depth specs:
-- `steel-plate-cut-sheet-optimizer-blueprint.md`: Complete blueprint and product requirements.
-- `Architehcure.md`: Entity data model, DB tables, API specs, and 120-task breakdown.
-- `End-to-end workflow.md`: 12-stage fabrication planning workflow.
-- `Data inputs Output.md`: Ingestion rules, regex specifications, algorithms, and report structures.
-- `Reports.md`: Detailed design guidelines for material, scrap, production, and cost reports.
+In-depth technical specifications and architectural documentation are available in the `/Documents` directory:
+- `steel-plate-cut-sheet-optimizer-blueprint.md`: Complete product requirements and functional blueprint.
+- `Architehcure.md`: Data models, database schema, API specifications, and optimization pipeline design.
+- `End-to-end workflow.md`: 12-stage industrial fabrication planning workflow.
+- `Data inputs Output.md`: Ingestion rules, regex tokenization rules, and report structures.
+- `Reports.md`: Shop-floor production, scrap analysis, and procurement reporting standards.
 
 ---
 
 ## ⚖️ License & Attribution
 
-Developed for industrial steel fabrication planning.  
+Developed for industrial steel fabrication planning and manufacturing.  
 **Powered by 1810 Systems** — All rights reserved.
