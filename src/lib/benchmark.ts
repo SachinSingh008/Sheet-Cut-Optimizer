@@ -401,58 +401,41 @@ export function generateBenchmarkReportMarkdown(suite: BenchmarkSuiteResult): st
  * Storage manager for persisting and retrieving benchmark results.
  */
 export const BenchmarkStorage = {
-  /** Saves a benchmark suite result to LocalStorage */
-  saveBenchmarkResult(suite: BenchmarkSuiteResult): void {
-    try {
-      const history = BenchmarkStorage.getStoredBenchmarks();
-      const updated = [suite, ...history.filter((item) => item.id !== suite.id)].slice(0, 50); // keep up to 50 runs
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn("Unable to save benchmark to localStorage:", e);
+  /** Saves a benchmark suite result (disabled persistence) */
+  saveBenchmarkResult(_suite: BenchmarkSuiteResult): void {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {}
     }
   },
 
-  /** Retrieves all stored benchmark suite results */
+  /** Retrieves stored benchmarks (always returns empty array) */
   getStoredBenchmarks(): BenchmarkSuiteResult[] {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return [];
-      return JSON.parse(raw) as BenchmarkSuiteResult[];
-    } catch (e) {
-      console.warn("Unable to read benchmarks from localStorage:", e);
-      return [];
-    }
+    return [];
   },
 
   /** Retrieves a specific benchmark run by ID */
-  getBenchmarkById(id: string): BenchmarkSuiteResult | undefined {
-    const list = BenchmarkStorage.getStoredBenchmarks();
-    return list.find((item) => item.id === id);
+  getBenchmarkById(_id: string): BenchmarkSuiteResult | undefined {
+    return undefined;
   },
 
   /** Deletes a single benchmark result by ID */
-  deleteBenchmarkResult(id: string): void {
-    try {
-      const history = BenchmarkStorage.getStoredBenchmarks();
-      const updated = history.filter((item) => item.id !== id);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch (e) {
-      console.warn("Unable to delete benchmark from localStorage:", e);
-    }
+  deleteBenchmarkResult(_id: string): void {
+    // No-op
   },
 
   /** Clears all stored benchmark runs */
   clearAllBenchmarks(): void {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
-      console.warn("Unable to clear benchmarks from localStorage:", e);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.clear();
+      } catch {}
     }
   },
 
   /** Exports all benchmark history as a formatted JSON string */
   exportBenchmarkHistoryJSON(): string {
-    const history = BenchmarkStorage.getStoredBenchmarks();
-    return JSON.stringify(history, null, 2);
+    return "[]";
   },
 };

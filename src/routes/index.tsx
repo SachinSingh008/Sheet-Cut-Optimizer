@@ -102,7 +102,7 @@ const workflowSteps = [
   },
 ];
 
-const mockParts = [
+const previewParts = [
   { id: "PL-101", x: 10, y: 10, w: 180, h: 90, color: "bg-primary/20 border-primary/40 text-primary" },
   { id: "PL-102", x: 200, y: 10, w: 140, h: 90, color: "bg-accent/20 border-accent/40 text-accent" },
   { id: "PL-103", x: 10, y: 110, w: 110, h: 120, color: "bg-chart-3/20 border-chart-3/40 text-chart-3" },
@@ -231,8 +231,8 @@ function Landing() {
                 <div className="relative h-64 w-full rounded-xl border border-dashed border-border bg-muted/40 overflow-hidden p-2">
                   <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:16px_16px]" />
 
-                  {/* Render Mock Nested Rectangles */}
-                  {mockParts.map((p) => (
+                  {/* Render Preview Nested Rectangles */}
+                  {previewParts.map((p) => (
                     <motion.div
                       key={p.id}
                       whileHover={{ scale: 1.02 }}

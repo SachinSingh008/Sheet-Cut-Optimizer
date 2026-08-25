@@ -13,10 +13,23 @@ import {
 } from "@/components/ui/dialog";
 import { store, useAppState } from "@/lib/store";
 import { DEFAULT_PLATE_TYPES, type PlateTypeConfig } from "@/lib/nesting";
+import { cn } from "@/lib/utils";
 
-export function PlateTypeInventorySection() {
+export function PlateTypeInventorySection({
+  filterCategory,
+  className,
+}: {
+  filterCategory?: "chq" | "normal";
+  className?: string;
+}) {
   const { config, result } = useAppState();
-  const plateTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
+  const allTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
+
+  const plateTypes = allTypes.filter((pt) => {
+    if (!filterCategory) return true;
+    const isChqType = pt.id === "chq" || /chq|cheq|chequered/i.test(`${pt.id} ${pt.name}`);
+    return filterCategory === "chq" ? isChqType : !isChqType;
+  });
 
   const [editingItem, setEditingItem] = useState<PlateTypeConfig | null>(null);
   const [isAdding, setIsAdding] = useState(false);
@@ -98,7 +111,7 @@ export function PlateTypeInventorySection() {
   };
 
   return (
-    <div className="mt-8 rounded-2xl border bg-card p-6 shadow-soft">
+    <div className={cn("mt-6 rounded-2xl border bg-card p-6 shadow-soft", className)}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-5 mb-5">
         <div>

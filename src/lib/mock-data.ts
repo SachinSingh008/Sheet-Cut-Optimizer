@@ -28,29 +28,65 @@ export function partArea(p: Part): number {
   return isNaN(val) || !isFinite(val) ? 0 : val;
 }
 
+import { findMatchingPlateType, DEFAULT_PLATE_TYPES, type PlateTypeConfig } from "./nesting";
+
 export const MOCK_PARTS: Part[] = [];
 
 export type ThicknessGroup = {
+  key: string;
   thickness: number;
+  plateTypeId: string;
+  plateTypeName: string;
+  sheetLength: number;
+  sheetWidth: number;
   parts: Part[];
   pieces: number;
   weight: number;
 };
 
-export function groupByThickness(parts: Part[]): ThicknessGroup[] {
-  const map = new Map<number, Part[]>();
+export function groupByThickness(
+  parts: Part[],
+  plateTypes: PlateTypeConfig[] = DEFAULT_PLATE_TYPES
+): ThicknessGroup[] {
+  const map = new Map<string, Part[]>();
+
   for (const p of parts) {
+    const pt = findMatchingPlateType(p, p.thickness, plateTypes);
+    const ptId = pt ? pt.id : "ms-thin";
     const t = Number(p.thickness) || 0;
-    map.set(t, [...(map.get(t) ?? []), p]);
+    const key = `${ptId}|${t}`;
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.push(p);
+    } else {
+      map.set(key, [p]);
+    }
   }
+
   return [...map.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([thickness, items]) => ({
-      thickness,
-      parts: items,
-      pieces: items.reduce((s, p) => s + (Number(p.qty) || 0), 0),
-      weight: items.reduce((s, p) => s + partWeight(p), 0),
-    }));
+    .map(([key, items]) => {
+      const first = items[0]!;
+      const pt = findMatchingPlateType(first, first.thickness, plateTypes);
+      const ptId = pt ? pt.id : "ms-thin";
+      const ptName = pt ? pt.name : "Mild Steel Plate (IS 2062 Thin)";
+      const sheetLength = pt ? pt.sheetLength : 6300;
+      const sheetWidth = pt ? pt.sheetWidth : 1500;
+      const thickness = Number(first.thickness) || 0;
+
+      return {
+        key,
+        thickness,
+        plateTypeId: ptId,
+        plateTypeName: ptName,
+        sheetLength,
+        sheetWidth,
+        parts: items,
+        pieces: items.reduce((s, p) => s + (Number(p.qty) || 0), 0),
+        weight: items.reduce((s, p) => s + partWeight(p), 0),
+      };
+    })
+    .sort((a, b) => a.thickness - b.thickness || a.plateTypeName.localeCompare(b.plateTypeName));
 }
 
 export const MATERIAL_RATE: Record<string, number> = {

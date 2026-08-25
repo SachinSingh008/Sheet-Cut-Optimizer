@@ -54,39 +54,23 @@ const initial: AppState = {
 
 const STORAGE_KEY = "steelnest_app_state_v2";
 
-function saveStateToStorage(s: AppState) {
-  if (typeof window === "undefined") return;
-  try {
-    const dataToSave = {
-      file: s.file,
-      parsed: s.parsed,
-      parts: s.parts,
-      rejectedParts: s.rejectedParts,
-      config: s.config,
-      result: s.result,
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-  } catch (err) {
-    console.warn("Failed to persist app state to localStorage:", err);
+function saveStateToStorage(_s: AppState) {
+  // Persistence disabled: refreshing page erases all session state
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
   }
 }
 
 function loadSavedState(): AppState {
-  if (typeof window === "undefined") return initial;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return initial;
-    const parsed = JSON.parse(raw);
-    return {
-      ...initial,
-      ...parsed,
-      isOptimizing: false,
-      progress: parsed.result ? 100 : 0,
-      progressMessage: parsed.result ? "Optimization complete" : "",
-    };
-  } catch {
-    return initial;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
   }
+  return initial;
 }
 
 let state: AppState = loadSavedState();

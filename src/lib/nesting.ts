@@ -38,7 +38,7 @@ export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
   {
     id: "chq",
     name: "Chequered Plate (IS 3502 / IS 2062)",
-    abbreviations: ["CHQ", "CHEQ", "CP", "CHEQUERED"],
+    abbreviations: ["CHQ", "CHEQ", "CP", "CHEQUERED", "CHECKERED", "PATTERN", "IS3502", "IS 3502"],
     minThickness: 2,
     maxThickness: 12,
     sheetLength: 6000,
@@ -261,28 +261,60 @@ export type OptimizationResult = {
 };
 
 export function findMatchingPlateType(
-  material: string,
-  thickness: number,
+  materialOrPart: string | Part,
+  thickness?: number,
   plateTypes: PlateTypeConfig[] = DEFAULT_PLATE_TYPES,
+  description?: string,
+  item?: string
 ): PlateTypeConfig | null {
-  const matUpper = material.toUpperCase();
-  
-  // 1. Primary check: match material abbreviation + thickness range
-  for (let i = 0; i < plateTypes.length; i++) {
-    const pt = plateTypes[i]!;
+  let matStr = "";
+  let thkNum = 0;
+  let descStr = "";
+  let itemStr = "";
+
+  if (typeof materialOrPart === "object" && materialOrPart !== null) {
+    matStr = materialOrPart.material || "";
+    thkNum = materialOrPart.thickness || 0;
+    descStr = materialOrPart.description || "";
+    itemStr = materialOrPart.item || "";
+    if (typeof thickness === "object" && Array.isArray(thickness)) {
+      plateTypes = thickness as unknown as PlateTypeConfig[];
+    }
+  } else {
+    matStr = materialOrPart || "";
+    thkNum = thickness || 0;
+    descStr = description || "";
+    itemStr = item || "";
+  }
+
+  const activeTypes = plateTypes && plateTypes.length > 0 ? plateTypes : DEFAULT_PLATE_TYPES;
+  const fullTextUpper = `${matStr} ${descStr} ${itemStr}`.toUpperCase();
+
+  // 1. Explicit check for Chequered Plate keywords
+  if (/CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|IS 3502|\bCP\b/.test(fullTextUpper)) {
+    const chqPt = activeTypes.find((pt) => pt.id === "chq");
+    if (chqPt && thkNum >= chqPt.minThickness && thkNum <= chqPt.maxThickness) {
+      return chqPt;
+    }
+  }
+
+  // 2. Primary check: search fullTextUpper for plate type abbreviation + thickness range
+  for (let i = 0; i < activeTypes.length; i++) {
+    const pt = activeTypes[i]!;
     for (let j = 0; j < pt.abbreviations.length; j++) {
-      if (matUpper.includes(pt.abbreviations[j]!.trim().toUpperCase())) {
-        if (thickness >= pt.minThickness && thickness <= pt.maxThickness) {
+      const abbr = pt.abbreviations[j]!.trim().toUpperCase();
+      if (abbr && fullTextUpper.includes(abbr)) {
+        if (thkNum >= pt.minThickness && thkNum <= pt.maxThickness) {
           return pt;
         }
       }
     }
   }
 
-  // 2. Fallback check: match by thickness range
-  for (let i = 0; i < plateTypes.length; i++) {
-    const pt = plateTypes[i]!;
-    if (pt.id !== "chq" && thickness >= pt.minThickness && thickness <= pt.maxThickness) {
+  // 3. Fallback check: match by thickness range (excluding CHQ unless explicitly matched above)
+  for (let i = 0; i < activeTypes.length; i++) {
+    const pt = activeTypes[i]!;
+    if (pt.id !== "chq" && thkNum >= pt.minThickness && thkNum <= pt.maxThickness) {
       return pt;
     }
   }
@@ -1819,6 +1851,226 @@ export function packGuillotineShelfSheet(
   return sheets;
 }
 
+/**
+ * Industrial Skyline Bottom-Left Profile Sheet Packer.
+ * Maintains top contour skylines across the sheet to place parts at the lowest, leftmost valid position.
+ * Backfills skyline waste gaps and eliminates staircase dead space.
+ */
+export function packSkylineSheet(
+  items: PackingItem[],
+  curSheetLength: number,
+  curSheetWidth: number,
+  config: OptimizationConfig,
+  material: string,
+  thickness: number,
+  sheetIdPrefix: string = "SKYLINE"
+): NestedSheet[] {
+  const trim = config.trim;
+  const kerf = config.kerf;
+  const usableL = curSheetLength - trim * 2;
+  const usableW = curSheetWidth - trim * 2;
+
+  let remainingQueue = items.slice();
+  const sheets: NestedSheet[] = [];
+
+  while (remainingQueue.length > 0) {
+    const sheetId = `${sheetIdPrefix}-${sheets.length + 1}`;
+    const placed: PlacedPart[] = [];
+    let usedArea = 0;
+    let index = 0;
+
+    let skyline: SkylineNode[] = [{ x: trim, y: trim, width: usableL }];
+
+    let placedAnyInPass = true;
+    while (placedAnyInPass && remainingQueue.length > 0) {
+      placedAnyInPass = false;
+
+      let bestItemIdx = -1;
+      let bestSkylineIdx = -1;
+      let bestW = 0;
+      let bestH = 0;
+      let bestRotated = false;
+      let bestX = 0;
+      let bestY = Infinity;
+      let bestScore = Infinity;
+
+      for (let i = 0; i < remainingQueue.length; i++) {
+        const item = remainingQueue[i]!;
+        let canRotate = config.rotation && item.w !== item.h;
+
+        let orientations = [{ w: item.w, h: item.h, rotated: item.rotated }];
+        if (canRotate) {
+          orientations.push({ w: item.h, h: item.w, rotated: !item.rotated });
+        }
+
+        for (const orient of orientations) {
+          for (let sIdx = 0; sIdx < skyline.length; sIdx++) {
+            let coveredW = 0;
+            let maxY = 0;
+            let fits = false;
+
+            for (let k = sIdx; k < skyline.length; k++) {
+              const node = skyline[k]!;
+              if (node.y > maxY) maxY = node.y;
+              coveredW += node.width;
+
+              if (coveredW >= orient.w) {
+                fits = true;
+                break;
+              }
+            }
+
+            if (fits && maxY + orient.h <= curSheetWidth - trim) {
+              const startX = skyline[sIdx]!.x;
+
+              let contactLen = 0;
+              if (startX === trim) contactLen += orient.h;
+              if (maxY === trim) contactLen += orient.w;
+              if (startX + orient.w >= curSheetLength - trim) contactLen += orient.h;
+              if (maxY + orient.h >= curSheetWidth - trim) contactLen += orient.w;
+
+              const score = maxY * 10000 + startX - contactLen * 50;
+
+              if (score < bestScore) {
+                bestScore = score;
+                bestItemIdx = i;
+                bestSkylineIdx = sIdx;
+                bestW = orient.w;
+                bestH = orient.h;
+                bestRotated = orient.rotated;
+                bestX = startX;
+                bestY = maxY;
+              }
+            }
+          }
+        }
+      }
+
+      if (bestItemIdx !== -1 && bestSkylineIdx !== -1) {
+        const chosen = remainingQueue[bestItemIdx]!;
+        placed.push({
+          key: `${sheetId}-${index}`,
+          part: chosen.part,
+          x: bestX,
+          y: bestY,
+          w: bestW,
+          h: bestH,
+          rotated: bestRotated,
+          index: index++,
+        });
+
+        usedArea += bestW * bestH;
+        remainingQueue.splice(bestItemIdx, 1);
+        placedAnyInPass = true;
+
+        const newSkyline: SkylineNode[] = [];
+        let i = 0;
+        while (i < skyline.length) {
+          const node = skyline[i]!;
+
+          if (node.x + node.width <= bestX) {
+            newSkyline.push(node);
+            i++;
+          } else if (node.x >= bestX + bestW + kerf) {
+            newSkyline.push(node);
+            i++;
+          } else {
+            if (node.x < bestX) {
+              newSkyline.push({ x: node.x, y: node.y, width: bestX - node.x });
+            }
+
+            const rightX = Math.min(node.x + node.width, curSheetLength - trim);
+            if (rightX > bestX + bestW + kerf) {
+              const remW = rightX - (bestX + bestW + kerf);
+              if (remW > 0) {
+                newSkyline.push({ x: bestX + bestW + kerf, y: node.y, width: remW });
+              }
+            }
+            i++;
+          }
+        }
+
+        newSkyline.push({
+          x: bestX,
+          y: bestY + bestH + kerf,
+          width: bestW + kerf,
+        });
+
+        newSkyline.sort((a, b) => a.x - b.x);
+
+        const mergedSkyline: SkylineNode[] = [];
+        for (const n of newSkyline) {
+          if (n.width <= 0) continue;
+          if (mergedSkyline.length === 0) {
+            mergedSkyline.push({ ...n });
+          } else {
+            const prev = mergedSkyline[mergedSkyline.length - 1]!;
+            if (Math.abs(prev.x + prev.width - n.x) < 2 && Math.abs(prev.y - n.y) < 2) {
+              prev.width += n.width;
+            } else {
+              mergedSkyline.push({ ...n });
+            }
+          }
+        }
+
+        skyline = mergedSkyline;
+      } else {
+        let minSegIdx = -1;
+        let minSegY = Infinity;
+
+        for (let s = 0; s < skyline.length; s++) {
+          if (skyline[s]!.y < minSegY) {
+            minSegY = skyline[s]!.y;
+            minSegIdx = s;
+          }
+        }
+
+        if (minSegIdx !== -1) {
+          const seg = skyline[minSegIdx]!;
+          const leftY = minSegIdx > 0 ? skyline[minSegIdx - 1]!.y : Infinity;
+          const rightY = minSegIdx < skyline.length - 1 ? skyline[minSegIdx + 1]!.y : Infinity;
+          const targetY = Math.min(leftY, rightY);
+
+          if (targetY > seg.y && targetY <= curSheetWidth - trim) {
+            seg.y = targetY;
+            placedAnyInPass = true;
+
+            const mergedSkyline: SkylineNode[] = [];
+            for (const n of skyline) {
+              if (mergedSkyline.length === 0) {
+                mergedSkyline.push({ ...n });
+              } else {
+                const prev = mergedSkyline[mergedSkyline.length - 1]!;
+                if (Math.abs(prev.x + prev.width - n.x) < 2 && Math.abs(prev.y - n.y) < 2) {
+                  prev.width += n.width;
+                } else {
+                  mergedSkyline.push({ ...n });
+                }
+              }
+            }
+            skyline = mergedSkyline;
+          }
+        }
+      }
+    }
+
+    if (placed.length === 0) break;
+
+    sheets.push({
+      id: sheetId,
+      material,
+      thickness,
+      sheetLength: curSheetLength,
+      sheetWidth: curSheetWidth,
+      placed,
+      usedArea,
+      utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+    });
+  }
+
+  return sheets;
+}
+
 /** Population-Based Optimizer algorithm maintaining 100 candidate layouts */
 export function solveBucketPopulation(
   queueItems: PackingItem[],
@@ -1862,6 +2114,17 @@ export function solveBucketPopulation(
     "baf",
     "guillotine-aligned",
     "largest-first-strict",
+  ];
+
+  const staticPolicies: GRASPPolicy[] = [
+    "area-descending",
+    "area-ascending",
+    "longest-side",
+    "shortest-side",
+    "perimeter",
+    "aspect-ratio",
+    "height-strip",
+    "width-strip",
   ];
 
   const sorters: Array<(a: PackingItem, b: PackingItem) => number> = [
@@ -2001,26 +2264,69 @@ export function solveBucketPopulation(
   }));
 
   let bestSheets = postOptimizationRecompact(bestIndividual.sheets, config);
+  const weights = config.scoringWeights ?? DEFAULT_SCORING_WEIGHTS[preset];
 
-  // Evaluate Industrial Guillotine-Shelf Grid packing as a competitive candidate layout
-  const shelfSheetsRaw = packGuillotineShelfSheet(
+  // Helper to evaluate and update global best candidate
+  function tryCandidateSheets(candidateSheetsRaw: NestedSheet[]) {
+    const candidateSheets = postOptimizationRecompact(candidateSheetsRaw, config);
+    if (candidateSheets.length === 0) return;
+
+    const candUtil = candidateSheets.reduce((a, s) => a + s.usedArea, 0) /
+      (candidateSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1) * 100;
+    const bestUtil = bestSheets.reduce((a, s) => a + s.usedArea, 0) /
+      (bestSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1) * 100;
+
+    const candScore = evaluateLayoutScore(candidateSheets, weights, config).score;
+    const bestScoreVal = evaluateLayoutScore(bestSheets, weights, config).score;
+
+    if (
+      candidateSheets.length < bestSheets.length ||
+      (candidateSheets.length === bestSheets.length && candUtil > bestUtil + 0.05) ||
+      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.05 && candScore > bestScoreVal)
+    ) {
+      bestSheets = candidateSheets;
+    }
+  }
+
+  // 3. Multi-Algorithm Evaluation: Evaluate Skyline Bottom-Left Engine across all ordering policies
+  for (const pol of staticPolicies) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    const skylineRaw = packSkylineSheet(
+      sortedQueue,
+      curSheetLength,
+      curSheetWidth,
+      config,
+      material,
+      thickness,
+      "SKYLINE"
+    );
+    tryCandidateSheets(skylineRaw);
+  }
+
+  // 4. Multi-Algorithm Evaluation: Evaluate MaxRects BFD Engine across all ordering policies & heuristics
+  const bfdSheetsRaw = solveBucketMinSheets(
     queueItems,
     curSheetLength,
     curSheetWidth,
     config,
     material,
-    thickness,
-    "SHELF"
+    thickness
   );
-  const shelfSheets = postOptimizationRecompact(shelfSheetsRaw, config);
+  tryCandidateSheets(bfdSheetsRaw);
 
-  if (
-    shelfSheets.length < bestSheets.length ||
-    (shelfSheets.length === bestSheets.length &&
-      evaluateLayoutScore(shelfSheets, DEFAULT_SCORING_WEIGHTS[preset], config).score >
-        evaluateLayoutScore(bestSheets, DEFAULT_SCORING_WEIGHTS[preset], config).score)
-  ) {
-    bestSheets = shelfSheets;
+  // 5. Multi-Algorithm Evaluation: Evaluate Guillotine-Shelf Grid packing across all ordering policies
+  for (const pol of staticPolicies) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    const shelfSheetsRaw = packGuillotineShelfSheet(
+      sortedQueue,
+      curSheetLength,
+      curSheetWidth,
+      config,
+      material,
+      thickness,
+      "SHELF"
+    );
+    tryCandidateSheets(shelfSheetsRaw);
   }
 
   return {
@@ -2041,11 +2347,16 @@ export function optimize(
   const valid = parts.filter((p) => !p.invalid);
   const buckets = new Map<string, Part[]>();
 
+  const activePlateTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
   const groupByMaterial = config.groupByMaterial ?? false;
 
   for (let i = 0; i < valid.length; i++) {
     const p = valid[i]!;
-    const key = groupByMaterial ? `${p.material}|${p.thickness}` : `${p.thickness}`;
+    const matchedPlate = findMatchingPlateType(p, p.thickness, activePlateTypes);
+    const plateTypeId = matchedPlate ? matchedPlate.id : "ms-thin";
+    const key = groupByMaterial
+      ? `${plateTypeId}|${p.material}|${p.thickness}`
+      : `${plateTypeId}|${p.thickness}`;
     const list = buckets.get(key);
     if (list) {
       list.push(p);
@@ -2054,7 +2365,6 @@ export function optimize(
     }
   }
 
-  const activePlateTypes = config.plateTypes ?? DEFAULT_PLATE_TYPES;
   const sheets: NestedSheet[] = [];
   const allPopulationCandidates: CandidateLayout[] = [];
   let totalGenerationsRun = 0;
@@ -2067,14 +2377,18 @@ export function optimize(
     const startProgress = 10 + ((bucketIndex - 1) / totalBuckets) * 75;
     const endProgress = 10 + (bucketIndex / totalBuckets) * 75;
 
-    const material = groupByMaterial
-      ? (key.split("|")[0] ?? "Combined Grade")
-      : (group[0]?.material ?? "IS:2062 (Combined)");
-    const thickness = groupByMaterial ? Number(key.split("|")[1] ?? 0) : Number(key);
+    const firstPart = group[0]!;
+    const matchedPlate = findMatchingPlateType(firstPart, firstPart.thickness, activePlateTypes);
+    const thickness = firstPart.thickness;
 
-    onProgress?.(startProgress, `Evolving population for bucket ${bucketIndex}/${totalBuckets}: ${material} (${thickness}mm)...`);
+    const material = matchedPlate
+      ? matchedPlate.id === "chq"
+        ? `IS:3502 Chequered Plate (${thickness}mm)`
+        : `${matchedPlate.name}`
+      : firstPart.material || `Mild Steel Plate (${thickness}mm)`;
 
-    const matchedPlate = findMatchingPlateType(material, thickness, activePlateTypes);
+    onProgress?.(startProgress, `Evolving population for bucket ${bucketIndex}/${totalBuckets}: ${material}...`);
+
     const curSheetLength = matchedPlate ? matchedPlate.sheetLength : config.sheetLength;
     const curSheetWidth = matchedPlate ? matchedPlate.sheetWidth : config.sheetWidth;
 

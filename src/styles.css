@@ -222,19 +222,51 @@
 
 /* Strict Print Rules: Exclude everything except the PDF print area */
 @media print {
+  /* Step 1: Hide all elements by default */
   body * {
     visibility: hidden !important;
   }
-  #pdf-print-area, #pdf-print-area * {
+
+  /* Step 2: Make pdf-report-overlay wrapper a clean un-clipped block */
+  .pdf-report-overlay {
+    position: static !important;
+    display: block !important;
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  /* Step 3: Make PDF report canvas and all its children visible */
+  #pdf-print-area,
+  #pdf-print-area * {
     visibility: visible !important;
   }
+
+  /* Step 4: Position #pdf-print-area at top-left of printable page */
   #pdf-print-area {
     position: absolute !important;
-    left: 0 !important;
     top: 0 !important;
+    left: 0 !important;
     width: 100% !important;
     margin: 0 !important;
-    padding: 20px !important;
+    padding: 0 !important;
     box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  /* Step 5: Reset page root viewport bounds */
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
   }
 }

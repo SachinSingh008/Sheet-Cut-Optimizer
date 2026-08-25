@@ -95,78 +95,93 @@ function LayoutsPage() {
       <PlateCutDiagramSection result={result} />
 
       {/* Zoomable & Draggable CAD Viewer Box */}
-      <div className="mt-8">
-        <h3 className="font-bold text-lg text-foreground mb-1">Interactive Canvas CAD Zoom & Pan</h3>
-        <p className="text-xs text-muted-foreground mb-4">Click parts to inspect dimensions, area, and rotation policy.</p>
+      <div className="mt-8 space-y-4">
+        <div>
+          <h3 className="font-bold text-lg text-foreground">Interactive CAD Blueprint Canvas</h3>
+          <p className="text-xs text-muted-foreground">Inspect parts on every sheet with attached right & bottom analysis sidebars.</p>
+        </div>
 
-        <div className="grid gap-6 xl:grid-cols-[1fr_260px]">
-          <div>
-            <SheetViewer sheet={sheet} />
+        {/* Layout Grid: Left = Vertically Stacked Sheets, Right = Sheet Canvas with Attached Sidebars */}
+        <div className="grid gap-6 xl:grid-cols-12">
+          {/* VERTICAL SHEET STACK SELECTOR (Left 3 Columns) */}
+          <div className="xl:col-span-3 space-y-3">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h4 className="font-bold text-xs uppercase tracking-wider text-muted-foreground">
+                Nested Stock Plates ({result.sheets.length})
+              </h4>
+              <span className="text-[11px] font-mono text-primary font-bold">
+                Sheet {index + 1} / {result.sheets.length}
+              </span>
+            </div>
 
-            <div className="mt-4 flex items-center justify-between gap-3">
+            {/* Vertically Stacked Sheet List (Categorized by Material Section) */}
+            <div className="space-y-4 max-h-[640px] overflow-y-auto pr-1 scrollbar-thin">
+              {(() => {
+                const chqItems = result.sheets.map((s, i) => ({ s, i })).filter(({ s }) => /chq|cheq|chequered|3502/i.test(s.material));
+                const normalItems = result.sheets.map((s, i) => ({ s, i })).filter(({ s }) => !/chq|cheq|chequered|3502/i.test(s.material));
+
+                if (chqItems.length === 0 || normalItems.length === 0) {
+                  return result.sheets.map((s, i) => (
+                    <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />
+                  ));
+                }
+
+                return (
+                  <>
+                    {chqItems.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between px-1 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
+                          <span>🟡 Chequered Plates ({chqItems.length})</span>
+                          <span>6000×1250</span>
+                        </div>
+                        {chqItems.map(({ s, i }) => (
+                          <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />
+                        ))}
+                      </div>
+                    )}
+
+                    {normalItems.length > 0 && (
+                      <div className="space-y-2 pt-2">
+                        <div className="flex items-center justify-between px-1 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-800 dark:text-blue-300 font-bold text-[11px]">
+                          <span>🔵 Normal MS Plates ({normalItems.length})</span>
+                          <span>6300×1500</span>
+                        </div>
+                        {normalItems.map(({ s, i }) => (
+                          <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-2 border-t">
               <Button
                 variant="outline"
+                size="sm"
+                className="w-full text-xs font-bold"
                 onClick={() => setIndex((i) => Math.max(i - 1, 0))}
                 disabled={index === 0}
               >
-                <ChevronLeft /> Previous
+                <ChevronLeft className="mr-1 size-3.5" /> Previous
               </Button>
-              <span className="text-sm font-medium text-muted-foreground">
-                Sheet {index + 1} of {result.sheets.length}
-              </span>
               <Button
                 variant="outline"
+                size="sm"
+                className="w-full text-xs font-bold"
                 onClick={() => setIndex((i) => Math.min(i + 1, result.sheets.length - 1))}
                 disabled={index >= result.sheets.length - 1}
               >
-                Next <ChevronRight />
+                Next <ChevronRight className="ml-1 size-3.5" />
               </Button>
-            </div>
-
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-2">
-              {result.sheets.map((s, i) => (
-                <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />
-              ))}
             </div>
           </div>
 
-          <aside className="space-y-4">
-            <div className="rounded-2xl border bg-card p-5 shadow-soft">
-              <h3 className="font-semibold">Sheet details</h3>
-              <dl className="mt-4 space-y-3 text-sm">
-                {[
-                  ["Sheet ID", sheet.id],
-                  ["Material", sheet.material],
-                  ["Thickness", `PL ${sheet.thickness} THK`],
-                  ["Stock size", `${sheet.sheetLength} × ${sheet.sheetWidth} mm`],
-                  ["Parts nested", `${sheet.placed.length}`],
-                  ["Utilization", `${sheet.utilization.toFixed(1)}%`],
-                  ["Waste", `${(100 - sheet.utilization).toFixed(1)}%`],
-                  ["Kerf", `${result.config.kerf} mm`],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between gap-4">
-                    <dt className="text-muted-foreground">{k}</dt>
-                    <dd className="text-right font-medium">{v}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-
-            <div className="rounded-2xl border bg-card p-5 shadow-soft">
-              <h3 className="font-semibold">Parts on this plate</h3>
-              <ul className="mt-3 max-h-[320px] space-y-2 overflow-auto text-sm">
-                {[...new Set(sheet.placed.map((p) => p.part.item))].map((item) => {
-                  const count = sheet.placed.filter((p) => p.part.item === item).length;
-                  return (
-                    <li key={item} className="flex justify-between rounded-lg bg-muted/50 px-3 py-2">
-                      <span className="font-medium">{item}</span>
-                      <span className="tabular-nums text-muted-foreground font-bold">× {count}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          </aside>
+          {/* MAIN CUTOUT CANVAS WITH ATTACHED RIGHT & BOTTOM SIDEBARS (Right 9 Columns) */}
+          <div className="xl:col-span-9">
+            <SheetViewer sheet={sheet} />
+          </div>
         </div>
       </div>
     </PageTransition>

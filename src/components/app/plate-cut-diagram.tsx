@@ -1,43 +1,17 @@
 import { useState, useMemo, useRef, useEffect } from "react";
-import { motion } from "framer-motion";
 import {
-  Scissors,
-  MapPin,
-  FileCheck2,
   Maximize2,
   ZoomIn,
   ZoomOut,
-  RotateCw,
-  Layers3,
-  CheckCircle2,
-  AlertCircle,
-  ChevronRight,
-  ChevronLeft,
-  Info,
-  Ruler,
+  Type,
+  Minus,
+  Plus,
   Move,
-  RefreshCw,
-  Layers,
-  LayoutGrid,
-  Navigation,
-  Zap,
-  Clock,
-  ArrowRight,
-  Sliders,
-  ListOrdered,
-  Sparkles,
 } from "lucide-react";
+import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import type { NestedSheet, PlacedPart, OptimizationResult } from "@/lib/nesting";
-import { generateCuttingSequence, type SheetCuttingSequenceResult, type CutType } from "@/lib/cutting-sequence";
+import type { NestedSheet, OptimizationResult } from "@/lib/nesting";
 
 const LIGHT_COLOR_PALETTE = [
   "#93c5fd", // Soft Blue
@@ -88,38 +62,22 @@ function computeRemnantOffcuts(sheet: NestedSheet) {
   return offcuts;
 }
 
-/** Format cut type into human readable badge label */
-function formatCutTypeBadge(type: CutType, stage: number) {
-  switch (type) {
-    case "guillotine-rip":
-      return { label: `Stage ${stage} Guillotine Rip`, bg: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20" };
-    case "guillotine-cross":
-      return { label: `Stage ${stage} Guillotine Cross`, bg: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20" };
-    case "continuous-strip":
-      return { label: `Stage ${stage} Continuous Strip`, bg: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" };
-    case "common-wall":
-      return { label: `Stage ${stage} Common Wall`, bg: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20" };
-    case "part-contour":
-      return { label: `Stage ${stage} Part Sizing`, bg: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20" };
-  }
-}
-
-/** 
- * Single Div Canvas for All Sheets of the Same Thickness Grade
- * Renders all sheets of the same thickness inside a SINGLE div container.
- */
 function ThicknessGroupCanvas({
+  categoryName,
   thickness,
   sheets,
   result,
   itemColors,
-  showCutSequenceOverlay,
+  textSizeScale,
+  onTextScaleChange,
 }: {
+  categoryName: string;
   thickness: number;
   sheets: NestedSheet[];
   result: OptimizationResult;
   itemColors: Map<string, string>;
-  showCutSequenceOverlay: boolean;
+  textSizeScale: number;
+  onTextScaleChange: (newScale: number) => void;
 }) {
   const [selectedPartKey, setSelectedPartKey] = useState<string | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
@@ -136,7 +94,6 @@ function ThicknessGroupCanvas({
     [sheets, spacingY]
   );
 
-  // Find currently selected part across all sheets in this group
   const selectedPart = useMemo(() => {
     if (!selectedPartKey) return null;
     for (const s of sheets) {
@@ -156,7 +113,7 @@ function ThicknessGroupCanvas({
   };
 
   const handleZoomOut = () => {
-    setZoomScale((s) => Math.max(0.5, Number((s - 0.25).toFixed(2))));
+    setZoomScale((s) => Math.max(0.4, Number((s - 0.25).toFixed(2))));
   };
 
   useEffect(() => {
@@ -164,16 +121,11 @@ function ThicknessGroupCanvas({
     if (!container) return;
 
     const handleWheelNative = (e: WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
       if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
         const delta = e.deltaY < 0 ? 0.15 : -0.15;
         setZoomScale((s) => Math.min(4, Math.max(0.4, Number((s + delta).toFixed(2)))));
-      } else if (e.shiftKey) {
-        setPanOffset((prev) => ({ x: prev.x - e.deltaY, y: prev.y }));
-      } else {
-        setPanOffset((prev) => ({ x: prev.x, y: prev.y - e.deltaY }));
       }
     };
 
@@ -200,452 +152,527 @@ function ThicknessGroupCanvas({
 
   return (
     <div className="space-y-4">
-      {/* Selected Part Callout Pill */}
+      {/* Selected Part Callout Banner */}
       {selectedPart ? (
-        <div className="rounded-xl border border-primary/40 bg-primary/10 p-3 text-xs flex items-center justify-between">
+        <div className="rounded-xl border border-primary/40 bg-primary/10 p-3 text-xs flex items-center justify-between shadow-xs">
           <div>
-            <span className="font-mono font-bold text-primary">Sheet {selectedPart.sheetId} · {selectedPart.part.part.item}</span>:{" "}
-            <strong>Length: {selectedPart.part.w.toLocaleString()} mm</strong> × <strong>Breadth: {selectedPart.part.h.toLocaleString()} mm</strong>
+            <span className="font-mono font-bold text-primary">
+              Sheet {selectedPart.sheetId} · {selectedPart.part.part.item}
+            </span>
+            : <strong>Length: {selectedPart.part.w.toLocaleString()} mm</strong> ×{" "}
+            <strong>Width: {selectedPart.part.h.toLocaleString()} mm</strong>
             <span className="text-muted-foreground ml-2">
-              (Position: X={selectedPart.part.x}mm, Y={selectedPart.part.y}mm | {selectedPart.part.rotated ? "Rotated 90°" : "Standard"})
+              (Material: {selectedPart.part.part.material} | Position: X={selectedPart.part.x}mm, Y=
+              {selectedPart.part.y}mm | {selectedPart.part.rotated ? "Rotated 90°" : "Standard"})
             </span>
           </div>
           <button
             onClick={() => setSelectedPartKey(null)}
-            className="text-muted-foreground hover:text-foreground font-bold text-xs cursor-pointer"
+            className="text-muted-foreground hover:text-foreground font-bold text-xs cursor-pointer ml-3 shrink-0"
           >
             ✕ Clear
           </button>
         </div>
       ) : null}
 
-      {/* SINGLE DIV CANVAS FOR ALL SHEETS OF THIS THICKNESS */}
-      <div
-        ref={containerRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        className={cn(
-          "relative rounded-xl border border-slate-400 bg-slate-200 p-6 overflow-hidden shadow-inner select-none transition-cursor",
-          isPanning ? "cursor-grabbing" : "cursor-grab"
-        )}
-        style={{ touchAction: "none" }}
-      >
-        {/* Top Floating Info Badges */}
-        <div className="absolute top-3 left-3 z-20 text-[11px] font-mono font-bold text-slate-800 bg-white/95 border border-slate-400 px-3 py-1.5 rounded-lg shadow-md flex items-center gap-2">
-          <span className="bg-primary text-white font-extrabold px-2 py-0.5 rounded text-[10px]">
-            THK {thickness}mm
-          </span>
-          <span>
-            {sheets.length} {sheets.length === 1 ? "SHEET" : "SHEETS STACKED"} ({sheets.map((s) => s.id).join(", ")})
-          </span>
-          <span className="text-slate-400">|</span>
-          <span>Kerf: {result.config.kerf}mm · Trim: {result.config.trim}mm</span>
+      {/* DEDICATED SCROLLABLE CANVAS VIEWPORT WITH HORIZONTAL BOTTOM BAR AND VERTICAL SIDEBAR */}
+      <div className="relative rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 shadow-md">
+        {/* Top Control Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-800/90 px-4 py-2.5 rounded-t-2xl">
+          {/* Left Info Badge */}
+          <div className="flex items-center gap-2 text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+            <span className="bg-primary text-white font-extrabold px-2.5 py-0.5 rounded text-[11px]">
+              THK {thickness}mm
+            </span>
+            <span>{categoryName}</span>
+            <span className="text-slate-400">|</span>
+            <span>
+              {sheets.length} {sheets.length === 1 ? "Sheet" : "Sheets Stacked"} (
+              {sheets.map((s) => s.id).join(", ")})
+            </span>
+          </div>
+
+          {/* Right Viewport Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Text Size Controls */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-xl border border-slate-300 dark:border-slate-600">
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 px-1.5 flex items-center gap-1">
+                <Type className="size-3.5" /> Text Size:
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => onTextScaleChange(Math.max(0.5, Number((textSizeScale - 0.15).toFixed(2))))}
+                className="size-6 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-600"
+                title="Decrease Text Size (-)"
+              >
+                <Minus className="size-3" />
+              </Button>
+              <span className="text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200 px-1 min-w-[38px] text-center">
+                {Math.round(textSizeScale * 100)}%
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => onTextScaleChange(Math.min(3.0, Number((textSizeScale + 0.15).toFixed(2))))}
+                className="size-6 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-600"
+                title="Increase Text Size (+)"
+              >
+                <Plus className="size-3" />
+              </Button>
+              <div className="h-3.5 w-px bg-slate-300 dark:bg-slate-600 mx-0.5" />
+              {[0.8, 1.0, 1.35, 1.75, 2.2].map((preset) => (
+                <button
+                  key={preset}
+                  onClick={() => onTextScaleChange(preset)}
+                  className={cn(
+                    "px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-colors cursor-pointer",
+                    textSizeScale === preset
+                      ? "bg-primary text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+                  )}
+                >
+                  {preset * 100}%
+                </button>
+              ))}
+            </div>
+
+            {/* Zoom Controls */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700 p-1 rounded-xl border border-slate-300 dark:border-slate-600">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleZoomIn}
+                className="size-6 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-600"
+                title="Zoom In (+)"
+              >
+                <ZoomIn className="size-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleZoomOut}
+                className="size-6 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-600"
+                title="Zoom Out (-)"
+              >
+                <ZoomOut className="size-3.5" />
+              </Button>
+              <span className="text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200 px-1 min-w-[36px] text-center">
+                {Math.round(zoomScale * 100)}%
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={handleResetZoomPan}
+                className="size-6 text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-600"
+                title="Reset View / Fit to Screen"
+              >
+                <Maximize2 className="size-3" />
+              </Button>
+            </div>
+          </div>
         </div>
 
-        {/* Floating Controls */}
-        <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-white/95 backdrop-blur-sm border border-slate-300 p-1.5 rounded-xl shadow-md">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={handleZoomIn}
-            className="size-7 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-            title="Zoom In (+)"
-          >
-            <ZoomIn className="size-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={handleZoomOut}
-            className="size-7 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-            title="Zoom Out (-)"
-          >
-            <ZoomOut className="size-4" />
-          </Button>
-          <span className="text-[11px] font-mono font-bold text-slate-700 px-1">
-            {Math.round(zoomScale * 100)}%
-          </span>
-          <div className="h-4 w-px bg-slate-300 mx-0.5" />
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={handleResetZoomPan}
-            className="size-7 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
-            title="Reset View / Fit to Screen"
-          >
-            <Maximize2 className="size-3.5" />
-          </Button>
-        </div>
-
-        {/* Pan & Zoom Instruction */}
-        <div className="absolute bottom-3 left-3 z-20 text-[10px] font-mono text-slate-600 bg-white/90 border border-slate-300 px-2.5 py-1 rounded-lg shadow-sm flex items-center gap-1.5">
-          <Move className="size-3 text-slate-500" />
-          <span>Scroll wheel / Drag to Navigate inside diagram | <strong>Ctrl + Scroll</strong> to Zoom</span>
-        </div>
-
-        {/* SINGLE UNIFIED SVG CANVAS CONTAINING ALL SHEETS OF THIS THICKNESS */}
-        <svg
-          viewBox={`-60 -60 ${maxW + 150} ${totalH + 60}`}
-          className="w-full h-auto rounded overflow-visible transition-transform duration-75"
+        {/* SCROLLABLE VIEWPORT CONTAINER WITH NATIVE HORIZONTAL & VERTICAL SCROLLBARS */}
+        <div
+          ref={containerRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          className={cn(
+            "relative w-full max-h-[720px] overflow-x-auto overflow-y-auto p-6 select-none transition-cursor",
+            "scrollbar-thin scrollbar-thumb-slate-400 dark:scrollbar-thumb-slate-600 scrollbar-track-slate-200 dark:scrollbar-track-slate-800",
+            isPanning ? "cursor-grabbing" : "cursor-grab"
+          )}
+          style={{ touchAction: "none" }}
         >
-          <defs>
-            <pattern id={`light-grid-thk-${thickness}`} width="100" height="100" patternUnits="userSpaceOnUse">
-              <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#d9aba0" strokeWidth="1.5" strokeOpacity="0.35" />
-            </pattern>
-            <pattern id={`scrap-hatch-thk-${thickness}`} width="20" height="20" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
-              <line x1="0" y1="0" x2="0" y2="20" stroke="#b86f5e" strokeWidth="2" strokeOpacity="0.25" />
-            </pattern>
-            {/* CNC Torch Arrow Marker */}
-            <marker id="torch-arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#0284c7" />
-            </marker>
-          </defs>
-
-          {/* Transform Group for Zoom & Pan across ALL sheets of this thickness */}
-          <g
-            transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoomScale})`}
-            style={{ transformOrigin: `${maxW / 2}px 0px` }}
+          {/* SVG CUTTING DIAGRAM CANVAS */}
+          <svg
+            viewBox={`-60 -60 ${maxW + 150} ${totalH + 60}`}
+            className="w-full h-auto min-w-[850px] rounded overflow-visible transition-transform duration-75"
           >
-            {sheets.map((sheet, sIdx) => {
-              const offsetY = sheets.slice(0, sIdx).reduce((sum, s) => sum + s.sheetWidth + spacingY, 0);
-              const remnantOffcuts = computeRemnantOffcuts(sheet);
-              const seqResult = generateCuttingSequence(sheet);
+            <defs>
+              <pattern
+                id={`light-grid-cat-${thickness}`}
+                width="100"
+                height="100"
+                patternUnits="userSpaceOnUse"
+              >
+                <path
+                  d="M 100 0 L 0 0 0 100"
+                  fill="none"
+                  stroke="#d9aba0"
+                  strokeWidth="1.5"
+                  strokeOpacity="0.35"
+                />
+              </pattern>
+              <pattern
+                id={`scrap-hatch-cat-${thickness}`}
+                width="20"
+                height="20"
+                patternTransform="rotate(45 0 0)"
+                patternUnits="userSpaceOnUse"
+              >
+                <line
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="20"
+                  stroke="#b86f5e"
+                  strokeWidth="2"
+                  strokeOpacity="0.25"
+                />
+              </pattern>
+            </defs>
 
-              return (
-                <g key={sheet.id} transform={`translate(0, ${offsetY})`}>
-                  {/* Sheet Header Banner inside Canvas */}
-                  <rect
-                    x={-10}
-                    y={-45}
-                    width={sheet.sheetLength + 20}
-                    height={34}
-                    fill="#0f172a"
-                    rx={6}
-                  />
-                  <text
-                    x={12}
-                    y={-23}
-                    fill="#ffffff"
-                    fontSize={16}
-                    fontWeight="800"
-                    fontFamily="sans-serif"
-                  >
-                    SHEET {sheet.id} OF {sheets.length} · {sheet.material} · THICKNESS: {sheet.thickness} mm (TOTAL REQ: {sheets.length} {sheets.length === 1 ? "SHEET" : "SHEETS"}) · STOCK SIZE: {sheet.sheetLength.toLocaleString()} × {sheet.sheetWidth.toLocaleString()} mm ({sheet.utilization.toFixed(1)}% yield)
-                  </text>
+            {/* Transform Group for Zoom & Drag-Pan */}
+            <g
+              transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoomScale})`}
+              style={{ transformOrigin: `${maxW / 2}px 0px` }}
+            >
+              {sheets.map((sheet, sIdx) => {
+                const offsetY = sheets
+                  .slice(0, sIdx)
+                  .reduce((sum, s) => sum + s.sheetWidth + spacingY, 0);
+                const remnantOffcuts = computeRemnantOffcuts(sheet);
 
-                  {/* Main Stock Plate Fill & Border */}
-                  <rect
-                    x={0}
-                    y={0}
-                    width={sheet.sheetLength}
-                    height={sheet.sheetWidth}
-                    fill="#f5e8e3"
-                    stroke="#a65342"
-                    strokeWidth={6}
-                  />
-                  <rect
-                    x={0}
-                    y={0}
-                    width={sheet.sheetLength}
-                    height={sheet.sheetWidth}
-                    fill={`url(#light-grid-thk-${thickness})`}
-                  />
+                return (
+                  <g key={sheet.id} transform={`translate(0, ${offsetY})`}>
+                    {/* Sheet Header Banner inside SVG */}
+                    <rect
+                      x={-10}
+                      y={-45}
+                      width={sheet.sheetLength + 20}
+                      height={34}
+                      fill="#0f172a"
+                      rx={6}
+                    />
+                    <text
+                      x={12}
+                      y={-23}
+                      fill="#ffffff"
+                      fontSize={16 * textSizeScale}
+                      fontWeight="800"
+                      fontFamily="sans-serif"
+                    >
+                      SHEET {sheet.id} OF {sheets.length} · {sheet.material} · THICKNESS:{" "}
+                      {sheet.thickness} mm · STOCK SIZE: {sheet.sheetLength.toLocaleString()} ×{" "}
+                      {sheet.sheetWidth.toLocaleString()} mm ({sheet.utilization.toFixed(1)}% yield)
+                    </text>
 
-                  {/* Edge Trim Allowance Line */}
-                  <rect
-                    x={result.config.trim}
-                    y={result.config.trim}
-                    width={sheet.sheetLength - result.config.trim * 2}
-                    height={sheet.sheetWidth - result.config.trim * 2}
-                    fill="none"
-                    stroke="#b86f5e"
-                    strokeWidth={2}
-                    strokeDasharray="8 8"
-                  />
+                    {/* Main Stock Plate Background */}
+                    <rect
+                      x={0}
+                      y={0}
+                      width={sheet.sheetLength}
+                      height={sheet.sheetWidth}
+                      fill="#f5e8e3"
+                      stroke="#a65342"
+                      strokeWidth={6}
+                    />
+                    <rect
+                      x={0}
+                      y={0}
+                      width={sheet.sheetLength}
+                      height={sheet.sheetWidth}
+                      fill={`url(#light-grid-cat-${thickness})`}
+                    />
 
-                  {/* 1. SCRAP / REMNANT OFFCUT ZONES IN CONTINUOUS BROWN STEEL PLATE */}
-                  {remnantOffcuts.map((o) => {
-                    const edgeFontSize = Math.max(12, Math.min(o.w / 12, o.h / 12, 28));
-                    const showHorizEdge = o.w > 60;
-                    const showVertEdge = o.h > 40;
+                    {/* Edge Trim Allowance Dashed Line */}
+                    <rect
+                      x={result.config.trim}
+                      y={result.config.trim}
+                      width={sheet.sheetLength - result.config.trim * 2}
+                      height={sheet.sheetWidth - result.config.trim * 2}
+                      fill="none"
+                      stroke="#b86f5e"
+                      strokeWidth={2}
+                      strokeDasharray="8 8"
+                    />
 
-                    return (
-                      <g key={o.id}>
-                        <rect
-                          x={o.x}
-                          y={o.y}
-                          width={o.w}
-                          height={o.h}
-                          fill="rgba(166, 83, 66, 0.06)"
-                          stroke="#a65342"
-                          strokeWidth={2}
-                          strokeDasharray="6 6"
-                        />
-                        <rect
-                          x={o.x}
-                          y={o.y}
-                          width={o.w}
-                          height={o.h}
-                          fill={`url(#scrap-hatch-thk-${thickness})`}
-                        />
+                    {/* 1. SCRAP / REMNANT OFFCUT ZONES */}
+                    {remnantOffcuts.map((o) => {
+                      const edgeFontSize = Math.max(12, Math.min(o.w / 12, o.h / 12, 28)) * textSizeScale;
 
-                        {showHorizEdge ? (
-                          <text
-                            x={o.x + o.w / 2}
-                            y={o.y + Math.min(22, o.h / 3)}
-                            textAnchor="middle"
-                            fill="#7c2d1e"
-                            fontSize={edgeFontSize}
-                            fontWeight="700"
-                            fontFamily="sans-serif"
-                          >
-                            {o.w.toLocaleString()}
-                          </text>
-                        ) : null}
+                      return (
+                        <g key={o.id}>
+                          <rect
+                            x={o.x}
+                            y={o.y}
+                            width={o.w}
+                            height={o.h}
+                            fill="rgba(166, 83, 66, 0.06)"
+                            stroke="#a65342"
+                            strokeWidth={2}
+                            strokeDasharray="6 6"
+                          />
+                          <rect
+                            x={o.x}
+                            y={o.y}
+                            width={o.w}
+                            height={o.h}
+                            fill={`url(#scrap-hatch-cat-${thickness})`}
+                          />
 
-                        {showVertEdge ? (
-                          <text
-                            x={o.x + Math.min(20, o.w / 3)}
-                            y={o.y + o.h / 2}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fill="#7c2d1e"
-                            fontSize={edgeFontSize}
-                            fontWeight="700"
-                            fontFamily="sans-serif"
-                            transform={`rotate(-90, ${o.x + Math.min(20, o.w / 3)}, ${o.y + o.h / 2})`}
-                          >
-                            {o.h.toLocaleString()}
-                          </text>
-                        ) : null}
-
-                        {o.w > 120 && o.h > 80 ? (
-                          <text
-                            x={o.x + o.w / 2}
-                            y={o.y + o.h / 2}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fill="#7c2d1e"
-                            fontSize={Math.max(11, Math.min(o.w / 16, o.h / 10, 22))}
-                            fontWeight="bold"
-                            fontFamily="sans-serif"
-                          >
-                            OFFCUT / SCRAP ({o.w.toLocaleString()} × {o.h.toLocaleString()} mm)
-                          </text>
-                        ) : null}
-                      </g>
-                    );
-                  })}
-
-                  {/* 2. NESTED CUT PARTS WITH CAD EDGE DIMENSIONS */}
-                  {sheet.placed.map((p) => {
-                    const color = itemColors.get(p.part.item) || "#93c5fd";
-                    const isSelected = selectedPartKey === p.key;
-
-                    const itemFontSize = Math.max(13, Math.min(p.w / 8, p.h / 4, 38));
-                    const edgeFontSize = Math.max(11, Math.min(p.w / 10, p.h / 6, 26));
-
-                    const showHoriz = p.w > 50;
-                    const showVert = p.h > 35;
-
-                    return (
-                      <g
-                        key={p.key}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPartKey(isSelected ? null : p.key);
-                        }}
-                        className="cursor-pointer transition-opacity hover:opacity-95"
-                      >
-                        <rect
-                          x={p.x}
-                          y={p.y}
-                          width={p.w}
-                          height={p.h}
-                          fill={color}
-                          fillOpacity={isSelected ? 0.95 : 0.85}
-                          stroke={isSelected ? "#0f172a" : "#1e293b"}
-                          strokeWidth={isSelected ? 6 : 3}
-                          rx={2}
-                        />
-
-                        {showHoriz ? (
-                          <text
-                            x={p.x + p.w / 2}
-                            y={p.y + Math.min(20, p.h / 3.5)}
-                            textAnchor="middle"
-                            fill="#0f172a"
-                            fontSize={edgeFontSize}
-                            fontWeight="800"
-                            fontFamily="sans-serif"
-                            stroke="#ffffff"
-                            strokeWidth={1}
-                            paintOrder="stroke fill"
-                          >
-                            {p.w.toLocaleString()}
-                          </text>
-                        ) : null}
-
-                        {showVert ? (
-                          <text
-                            x={p.x + Math.min(20, p.w / 3.5)}
-                            y={p.y + p.h / 2}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fill="#0f172a"
-                            fontSize={edgeFontSize}
-                            fontWeight="800"
-                            fontFamily="sans-serif"
-                            stroke="#ffffff"
-                            strokeWidth={1}
-                            paintOrder="stroke fill"
-                            transform={`rotate(-90, ${p.x + Math.min(20, p.w / 3.5)}, ${p.y + p.h / 2})`}
-                          >
-                            {p.h.toLocaleString()}
-                          </text>
-                        ) : null}
-
-                        <text
-                          x={p.x + p.w / 2}
-                          y={p.y + p.h / 2 + (showHoriz ? 8 : 0)}
-                          textAnchor="middle"
-                          dominantBaseline="central"
-                          fill="#0f172a"
-                          fontSize={itemFontSize}
-                          fontWeight="900"
-                          fontFamily="sans-serif"
-                          stroke="#ffffff"
-                          strokeWidth={1.5}
-                          paintOrder="stroke fill"
-                        >
-                          {p.part.item}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* 3. OPTIONAL OVERLAY: CNC CUTTING TORCH VECTOR PATH & ORDERED SEQUENCES (#1, #2...) */}
-                  {showCutSequenceOverlay ? (
-                    <g key="cut-sequence-overlay">
-                      {seqResult.operations.map((op: import("@/lib/cutting-sequence").CuttingOperation, opIdx: number) => {
-                        const prevPt = opIdx > 0 ? seqResult.operations[opIdx - 1]!.endPoint : { x: 0, y: 0 };
-                        const isRapid = op.rapidTraverseDistance > 5;
-
-                        return (
-                          <g key={`op-${op.sequenceNumber}`}>
-                            {/* Rapid Traverse Air-Cut Move (Dashed Line) */}
-                            {isRapid ? (
-                              <line
-                                x1={prevPt.x}
-                                y1={prevPt.y}
-                                x2={op.piercePoint.x}
-                                y2={op.piercePoint.y}
-                                stroke="#e11d48"
-                                strokeWidth={2}
-                                strokeDasharray="4 4"
-                                strokeOpacity={0.7}
-                              />
-                            ) : null}
-
-                            {/* Active Torch Cut Path Line */}
-                            <line
-                              x1={op.piercePoint.x}
-                              y1={op.piercePoint.y}
-                              x2={op.endPoint.x}
-                              y2={op.endPoint.y}
-                              stroke="#0284c7"
-                              strokeWidth={4}
-                              markerEnd="url(#torch-arrow)"
-                            />
-
-                            {/* Pierce Point Badge Marker (#1, #2, #3...) */}
-                            <circle
-                              cx={op.piercePoint.x}
-                              cy={op.piercePoint.y}
-                              r={14}
-                              fill="#0284c7"
-                              stroke="#ffffff"
-                              strokeWidth={2}
-                            />
+                          {o.w > 60 ? (
                             <text
-                              x={op.piercePoint.x}
-                              y={op.piercePoint.y}
+                              x={o.x + o.w / 2}
+                              y={o.y + Math.min(22, o.h / 3)}
+                              textAnchor="middle"
+                              fill="#7c2d1e"
+                              fontSize={edgeFontSize}
+                              fontWeight="700"
+                              fontFamily="sans-serif"
+                            >
+                              {o.w.toLocaleString()}
+                            </text>
+                          ) : null}
+
+                          {o.h > 40 ? (
+                            <text
+                              x={o.x + Math.min(20, o.w / 3)}
+                              y={o.y + o.h / 2}
                               textAnchor="middle"
                               dominantBaseline="central"
-                              fill="#ffffff"
-                              fontSize={11}
-                              fontWeight="bold"
-                              fontFamily="monospace"
+                              fill="#7c2d1e"
+                              fontSize={edgeFontSize}
+                              fontWeight="700"
+                              fontFamily="sans-serif"
+                              transform={`rotate(-90, ${o.x + Math.min(20, o.w / 3)}, ${o.y + o.h / 2})`}
                             >
-                              {op.sequenceNumber}
+                              {o.h.toLocaleString()}
                             </text>
-                          </g>
-                        );
-                      })}
-                    </g>
-                  ) : null}
+                          ) : null}
 
-                  {/* 4. OUTER BOUNDS FOR THIS SHEET */}
-                  <line
-                    x1={0}
-                    y1={sheet.sheetWidth + 25}
-                    x2={sheet.sheetLength}
-                    y2={sheet.sheetWidth + 25}
-                    stroke="#dc2626"
-                    strokeWidth={2}
-                  />
-                  <line x1={0} y1={sheet.sheetWidth + 15} x2={0} y2={sheet.sheetWidth + 35} stroke="#dc2626" strokeWidth={2} />
-                  <line x1={sheet.sheetLength} y1={sheet.sheetWidth + 15} x2={sheet.sheetLength} y2={sheet.sheetWidth + 35} stroke="#dc2626" strokeWidth={2} />
-                  <text
-                    x={sheet.sheetLength / 2}
-                    y={sheet.sheetWidth + 45}
-                    textAnchor="middle"
-                    fill="#dc2626"
-                    fontSize={20}
-                    fontWeight="bold"
-                    fontFamily="sans-serif"
-                  >
-                    COMPLETE SHEET LENGTH: {sheet.sheetLength.toLocaleString()} mm
-                  </text>
+                          {o.w > 120 && o.h > 80 ? (
+                            <text
+                              x={o.x + o.w / 2}
+                              y={o.y + o.h / 2}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fill="#7c2d1e"
+                              fontSize={Math.max(11, Math.min(o.w / 16, o.h / 10, 22)) * textSizeScale}
+                              fontWeight="bold"
+                              fontFamily="sans-serif"
+                            >
+                              SCRAP / OFFCUT ({o.w.toLocaleString()} × {o.h.toLocaleString()} mm)
+                            </text>
+                          ) : null}
+                        </g>
+                      );
+                    })}
 
-                  <line
-                    x1={sheet.sheetLength + 25}
-                    y1={0}
-                    x2={sheet.sheetLength + 25}
-                    y2={sheet.sheetWidth}
-                    stroke="#dc2626"
-                    strokeWidth={2}
-                  />
-                  <line x1={sheet.sheetLength + 15} y1={0} x2={sheet.sheetLength + 35} y2={0} stroke="#dc2626" strokeWidth={2} />
-                  <line x1={sheet.sheetLength + 15} y1={sheet.sheetWidth} x2={sheet.sheetLength + 35} y2={sheet.sheetWidth} stroke="#dc2626" strokeWidth={2} />
-                  <text
-                    x={sheet.sheetLength + 48}
-                    y={sheet.sheetWidth / 2}
-                    textAnchor="middle"
-                    fill="#dc2626"
-                    fontSize={20}
-                    fontWeight="bold"
-                    fontFamily="sans-serif"
-                    transform={`rotate(90, ${sheet.sheetLength + 48}, ${sheet.sheetWidth / 2})`}
-                  >
-                    COMPLETE SHEET BREADTH: {sheet.sheetWidth.toLocaleString()} mm
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+                    {/* 2. PLACED CUT PARTS WITH HIGH VISIBILITY CAD EDGE DIMENSIONS */}
+                    {sheet.placed.map((p) => {
+                      const color = itemColors.get(p.part.item) || "#93c5fd";
+                      const isSelected = selectedPartKey === p.key;
+
+                      const baseItemFontSize = Math.max(14, Math.min(p.w / 7, p.h / 3.5, 42));
+                      const baseEdgeFontSize = Math.max(12, Math.min(p.w / 9, p.h / 5, 28));
+
+                      const itemFontSize = baseItemFontSize * textSizeScale;
+                      const edgeFontSize = baseEdgeFontSize * textSizeScale;
+
+                      const showHoriz = p.w > 35;
+                      const showVert = p.h > 25;
+
+                      return (
+                        <g
+                          key={p.key}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPartKey(isSelected ? null : p.key);
+                          }}
+                          className="cursor-pointer transition-opacity hover:opacity-95"
+                        >
+                          <rect
+                            x={p.x}
+                            y={p.y}
+                            width={p.w}
+                            height={p.h}
+                            fill={color}
+                            fillOpacity={isSelected ? 0.95 : 0.85}
+                            stroke={isSelected ? "#0f172a" : "#1e293b"}
+                            strokeWidth={isSelected ? 6 : 3}
+                            rx={2}
+                          />
+
+                          {/* Top Horizontal Edge Width Dimension Text */}
+                          {showHoriz ? (
+                            <text
+                              x={p.x + p.w / 2}
+                              y={p.y + Math.min(22, p.h / 3.2)}
+                              textAnchor="middle"
+                              fill="#0f172a"
+                              fontSize={edgeFontSize}
+                              fontWeight="900"
+                              fontFamily="sans-serif"
+                              stroke="#ffffff"
+                              strokeWidth={1.5}
+                              paintOrder="stroke fill"
+                            >
+                              {p.w.toLocaleString()}
+                            </text>
+                          ) : null}
+
+                          {/* Left Vertical Edge Length Dimension Text */}
+                          {showVert ? (
+                            <text
+                              x={p.x + Math.min(22, p.w / 3.2)}
+                              y={p.y + p.h / 2}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fill="#0f172a"
+                              fontSize={edgeFontSize}
+                              fontWeight="900"
+                              fontFamily="sans-serif"
+                              stroke="#ffffff"
+                              strokeWidth={1.5}
+                              paintOrder="stroke fill"
+                              transform={`rotate(-90, ${p.x + Math.min(22, p.w / 3.2)}, ${p.y + p.h / 2})`}
+                            >
+                              {p.h.toLocaleString()}
+                            </text>
+                          ) : null}
+
+                          {/* Center Item Mark & Dimension Subtext */}
+                          <text
+                            x={p.x + p.w / 2}
+                            y={p.y + p.h / 2 + (showHoriz ? 8 : 0)}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill="#0f172a"
+                            fontSize={itemFontSize}
+                            fontWeight="900"
+                            fontFamily="sans-serif"
+                            stroke="#ffffff"
+                            strokeWidth={2}
+                            paintOrder="stroke fill"
+                          >
+                            {p.part.item}
+                          </text>
+
+                          {/* Secondary Dimension Callout inside Part when space permits */}
+                          {p.w > 120 && p.h > 70 ? (
+                            <text
+                              x={p.x + p.w / 2}
+                              y={p.y + p.h / 2 + (showHoriz ? 8 : 0) + itemFontSize * 0.85}
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fill="#0f172a"
+                              fontSize={Math.max(10, edgeFontSize * 0.8)}
+                              fontWeight="700"
+                              fontFamily="monospace"
+                              stroke="#ffffff"
+                              strokeWidth={1}
+                              paintOrder="stroke fill"
+                            >
+                              {p.w} × {p.h} mm
+                            </text>
+                          ) : null}
+                        </g>
+                      );
+                    })}
+
+                    {/* 3. OUTER BOUNDARY DIMENSION LINES & ARROWS */}
+                    <line
+                      x1={0}
+                      y1={sheet.sheetWidth + 25}
+                      x2={sheet.sheetLength}
+                      y2={sheet.sheetWidth + 25}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <line
+                      x1={0}
+                      y1={sheet.sheetWidth + 15}
+                      x2={0}
+                      y2={sheet.sheetWidth + 35}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <line
+                      x1={sheet.sheetLength}
+                      y1={sheet.sheetWidth + 15}
+                      x2={sheet.sheetLength}
+                      y2={sheet.sheetWidth + 35}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <text
+                      x={sheet.sheetLength / 2}
+                      y={sheet.sheetWidth + 48}
+                      textAnchor="middle"
+                      fill="#dc2626"
+                      fontSize={22 * textSizeScale}
+                      fontWeight="bold"
+                      fontFamily="sans-serif"
+                    >
+                      STOCK LENGTH: {sheet.sheetLength.toLocaleString()} mm
+                    </text>
+
+                    <line
+                      x1={sheet.sheetLength + 25}
+                      y1={0}
+                      x2={sheet.sheetLength + 25}
+                      y2={sheet.sheetWidth}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <line
+                      x1={sheet.sheetLength + 15}
+                      y1={0}
+                      x2={sheet.sheetLength + 35}
+                      y2={0}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <line
+                      x1={sheet.sheetLength + 15}
+                      y1={sheet.sheetWidth}
+                      x2={sheet.sheetLength + 35}
+                      y2={sheet.sheetWidth}
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                    />
+                    <text
+                      x={sheet.sheetLength + 50}
+                      y={sheet.sheetWidth / 2}
+                      textAnchor="middle"
+                      fill="#dc2626"
+                      fontSize={22 * textSizeScale}
+                      fontWeight="bold"
+                      fontFamily="sans-serif"
+                      transform={`rotate(90, ${sheet.sheetLength + 50}, ${sheet.sheetWidth / 2})`}
+                    >
+                      STOCK BREADTH: {sheet.sheetWidth.toLocaleString()} mm
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+        </div>
+
+        {/* Viewport Scroll & Navigation Hint Footer Bar */}
+        <div className="flex items-center justify-between border-t border-slate-300 dark:border-slate-700 bg-white/90 dark:bg-slate-800/90 px-4 py-2 text-[11px] font-mono text-slate-600 dark:text-slate-300 rounded-b-2xl">
+          <div className="flex items-center gap-2">
+            <Move className="size-3.5 text-primary" />
+            <span>
+              Use <strong>Horizontal Scrollbar (Bottom)</strong> & <strong>Vertical Scrollbar (Right)</strong> or Drag to view full plate length.
+            </span>
+          </div>
+          <span>Ctrl + Wheel to Zoom in/out</span>
+        </div>
       </div>
     </div>
   );
 }
 
 export function PlateCutDiagramSection({ result }: { result: OptimizationResult | null }) {
-  const [activeThicknessFilter, setActiveThicknessFilter] = useState<number | "all">("all");
-  const [showCutSequenceOverlay, setShowCutSequenceOverlay] = useState(true);
-  const [activeTab, setActiveTab] = useState<"diagram" | "cut-sequence">("diagram");
+  const [textSizeScale, setTextSizeScale] = useState(1.0);
+  const [activeGroupFilter, setActiveGroupFilter] = useState<string | "all">("all");
 
   if (!result || !result.sheets.length) {
     return (
@@ -655,18 +682,45 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     );
   }
 
-  // Group sheets by thickness ascending
-  const sheetsByThickness = useMemo(() => {
-    const map = new Map<number, NestedSheet[]>();
-    for (const s of result.sheets) {
-      if (!map.has(s.thickness)) {
-        map.set(s.thickness, []);
+  // Group sheets by plate material category, thickness & stock size
+  const sheetsByGroup = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        categoryName: string;
+        isChq: boolean;
+        thickness: number;
+        sheetLength: number;
+        sheetWidth: number;
+        sheets: NestedSheet[];
       }
-      map.get(s.thickness)!.push(s);
+    >();
+
+    for (const s of result.sheets) {
+      const isChq = /chq|cheq|chequered|checkered|3502/i.test(`${s.material}`);
+      const categoryName = isChq
+        ? `Chequered Plate ${s.thickness}mm`
+        : `Normal Mild Steel Plate ${s.thickness}mm`;
+      const key = `${isChq ? "chq" : "ms"}-${s.thickness}-${s.sheetLength}x${s.sheetWidth}`;
+
+      let existing = map.get(key);
+      if (!existing) {
+        existing = {
+          key,
+          categoryName,
+          isChq,
+          thickness: s.thickness,
+          sheetLength: s.sheetLength,
+          sheetWidth: s.sheetWidth,
+          sheets: [],
+        };
+        map.set(key, existing);
+      }
+      existing.sheets.push(s);
     }
-    return [...map.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([thickness, sheets]) => ({ thickness, sheets }));
+
+    return [...map.values()].sort((a, b) => a.thickness - b.thickness || (a.isChq ? -1 : 1));
   }, [result.sheets]);
 
   const itemColors = useMemo(() => {
@@ -683,280 +737,131 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
     return map;
   }, [result.sheets]);
 
-  // Combined cutting sequence stats across all sheets
-  const overallSeqStats = useMemo(() => {
-    let totalCutLength = 0;
-    let totalRapid = 0;
-    let totalPierces = 0;
-    let savedCutLength = 0;
-    let savedPierces = 0;
-    let totalEstimatedTimeSec = 0;
-
-    for (const s of result.sheets) {
-      const seq = generateCuttingSequence(s);
-      totalCutLength += seq.totalCutLength;
-      totalRapid += seq.totalRapidTraverse;
-      totalPierces += seq.totalPierces;
-      savedCutLength += seq.savedCutLength;
-      savedPierces += seq.savedPierces;
-      totalEstimatedTimeSec += seq.totalEstimatedTimeSec;
-    }
-
-    return {
-      totalCutLength,
-      totalRapid,
-      totalPierces,
-      savedCutLength,
-      savedPierces,
-      totalEstimatedTimeSec,
-      estimatedTimeMins: (totalEstimatedTimeSec / 60).toFixed(1),
-    };
-  }, [result.sheets]);
-
   return (
     <div className="mt-6 space-y-6">
-      {/* Top Controls Header Bar */}
+      {/* Header & Controls Bar */}
       <div className="rounded-2xl border bg-card p-5 shadow-soft">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="grid size-7 place-items-center rounded-lg bg-primary-soft text-primary font-bold text-xs">
                 CAD
               </span>
               <h3 className="font-bold text-lg text-foreground">
-                Plate Cutting Diagram & CNC Cut Sequence
+                Plate Cutting Layout Diagrams
               </h3>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Production cutting sequence optimized to minimize machine travel and group common cuts.
+              High-visibility CAD plate layouts with exact cut dimensions, item marks, scrap offcuts, and text scaling controls.
             </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant={showCutSequenceOverlay ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowCutSequenceOverlay((prev) => !prev)}
-              className="text-xs font-bold"
-            >
-              <Navigation className="mr-1.5 size-3.5" />
-              {showCutSequenceOverlay ? "Hide CNC Cut Path Overlay" : "Show CNC Cut Path (#1, #2...)"}
-            </Button>
           </div>
         </div>
 
-        {/* Cutting Sequence KPI Callout Grid */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div className="rounded-xl border bg-card p-3 shadow-xs">
-            <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span>Rapid Traverse</span>
-              <Navigation className="size-3.5 text-rose-500" />
-            </div>
-            <p className="text-base font-extrabold text-foreground font-mono">
-              {(overallSeqStats.totalRapid / 1000).toFixed(1)} m
-            </p>
-            <p className="text-[10px] text-emerald-600 font-semibold mt-0.5">Minimized Machine Air-Cut</p>
-          </div>
-
-          <div className="rounded-xl border bg-card p-3 shadow-xs">
-            <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span>Saved Cut Distance</span>
-              <Scissors className="size-3.5 text-emerald-500" />
-            </div>
-            <p className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
-              +{(overallSeqStats.savedCutLength / 1000).toFixed(1)} m
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Common & Strip Cuts</p>
-          </div>
-
-          <div className="rounded-xl border bg-card p-3 shadow-xs">
-            <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span>Total Pierces</span>
-              <Zap className="size-3.5 text-amber-500" />
-            </div>
-            <p className="text-base font-extrabold text-foreground font-mono">
-              {overallSeqStats.totalPierces}
-            </p>
-            <p className="text-[10px] text-emerald-600 font-semibold mt-0.5">-{overallSeqStats.savedPierces} Pierces Saved</p>
-          </div>
-
-          <div className="rounded-xl border bg-card p-3 shadow-xs">
-            <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span>Machine Time</span>
-              <Clock className="size-3.5 text-sky-500" />
-            </div>
-            <p className="text-base font-extrabold text-foreground font-mono">
-              {overallSeqStats.estimatedTimeMins} mins
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Cut + Traverse + Pierce</p>
-          </div>
-        </div>
-
-        {/* Thickness Filter Tabs */}
+        {/* Category Filter Tabs */}
         <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-muted-foreground/30 scrollbar-track-transparent">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mr-1 shrink-0">
-            Plate Thickness:
+            Plate Category:
           </span>
 
           <button
-            onClick={() => setActiveThicknessFilter("all")}
+            onClick={() => setActiveGroupFilter("all")}
             className={cn(
               "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all whitespace-nowrap cursor-pointer shrink-0",
-              activeThicknessFilter === "all"
+              activeGroupFilter === "all"
                 ? "border-primary bg-primary text-primary-foreground shadow-sm"
                 : "border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"
             )}
           >
-            <span>All Thicknesses</span>
-            <span className={cn(
-              "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
-              activeThicknessFilter === "all" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-            )}>
+            <span>All Plate Categories</span>
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
+                activeGroupFilter === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
               {result.sheets.length} Sheets
             </span>
           </button>
 
-          {sheetsByThickness.map(({ thickness, sheets }) => (
+          {sheetsByGroup.map((g) => (
             <button
-              key={thickness}
-              onClick={() => setActiveThicknessFilter(thickness)}
+              key={g.key}
+              onClick={() => setActiveGroupFilter(g.key)}
               className={cn(
                 "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all whitespace-nowrap cursor-pointer shrink-0",
-                activeThicknessFilter === thickness
-                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                activeGroupFilter === g.key
+                  ? g.isChq
+                    ? "border-amber-500 bg-amber-500 text-white shadow-sm"
+                    : "border-primary bg-primary text-primary-foreground shadow-sm"
                   : "border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground"
               )}
             >
-              <span>{thickness}mm Plates</span>
-              <span className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
-                activeThicknessFilter === thickness ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
-              )}>
-                {sheets.length} {sheets.length === 1 ? "sheet" : "sheets"}
+              <span>
+                {g.isChq ? "🟡 CHQ" : "🔵 Normal"} {g.thickness}mm ({g.sheetLength}×{g.sheetWidth})
+              </span>
+              <span
+                className={cn(
+                  "rounded px-1.5 py-0.5 text-[10px] tabular-nums font-mono",
+                  activeGroupFilter === g.key
+                    ? "bg-white/20 text-white"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                {g.sheets.length} {g.sheets.length === 1 ? "sheet" : "sheets"}
               </span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* RENDER ALL SHEETS OF THE SAME THICKNESS INSIDE A SINGLE CANVAS DIV & ORDERED CUT LIST */}
+      {/* RENDER DEDICATED DIAGRAM CANVASES PER CATEGORY GROUP */}
       <div className="space-y-8">
-        {sheetsByThickness
-          .filter(({ thickness }) => activeThicknessFilter === "all" || activeThicknessFilter === thickness)
-          .map(({ thickness, sheets }) => (
-            <div key={thickness} className="space-y-4 rounded-2xl border bg-card p-6 shadow-soft">
-              {/* Thickness Section Header Banner */}
+        {sheetsByGroup
+          .filter((g) => activeGroupFilter === "all" || activeGroupFilter === g.key)
+          .map((g) => (
+            <div key={g.key} className="space-y-4 rounded-2xl border bg-card p-6 shadow-soft">
+              {/* Category Group Header Banner */}
               <div className="flex items-center justify-between border-b pb-3 bg-muted/40 p-3.5 rounded-xl border">
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="rounded-lg bg-primary text-primary-foreground font-mono font-bold text-xs px-2.5 py-1">
-                    THICKNESS: {thickness} mm
+                  <span
+                    className={`rounded-lg font-mono font-bold text-xs px-2.5 py-1 ${
+                      g.isChq
+                        ? "bg-amber-500/20 border border-amber-500/30 text-amber-800 dark:text-amber-300"
+                        : "bg-primary text-primary-foreground"
+                    }`}
+                  >
+                    {g.isChq ? "CHEQUERED PLATE" : "STANDARD MS PLATE"}: {g.thickness} mm
                   </span>
                   <span className="rounded-lg bg-emerald-600 text-white font-mono font-bold text-xs px-2.5 py-1 shadow-xs">
-                    QTY REQUIRED: {sheets.length} {sheets.length === 1 ? "SHEET" : "SHEETS"}
+                    QTY REQUIRED: {g.sheets.length} {g.sheets.length === 1 ? "SHEET" : "SHEETS"}
                   </span>
                   <h4 className="font-bold text-sm text-foreground">
-                    ({sheets[0]?.sheetLength.toLocaleString()} × {sheets[0]?.sheetWidth.toLocaleString()} mm Stock Plate)
+                    ({g.sheetLength.toLocaleString()} × {g.sheetWidth.toLocaleString()} mm Stock Plate)
                   </h4>
                 </div>
                 <span className="text-xs font-bold text-muted-foreground font-mono">
-                  Sheet IDs: {sheets.map((s) => s.id).join(", ")}
+                  Sheet IDs: {g.sheets.map((s) => s.id).join(", ")}
                 </span>
               </div>
 
-              {/* Grid: Left Column = Single Div Canvas for All Sheets of this Thickness, Right Column = Ordered Cut List */}
-              <div className="grid gap-6 xl:grid-cols-12">
-                {/* SINGLE DIV CANVAS CONTAINER FOR ALL SHEETS OF THIS THICKNESS */}
-                <div className="xl:col-span-7">
-                  <ThicknessGroupCanvas
-                    thickness={thickness}
-                    sheets={sheets}
-                    result={result}
-                    itemColors={itemColors}
-                    showCutSequenceOverlay={showCutSequenceOverlay}
-                  />
-                </div>
+              {/* Full Width High Visibility CAD Layout Canvas */}
+              <ThicknessGroupCanvas
+                categoryName={g.categoryName}
+                thickness={g.thickness}
+                sheets={g.sheets}
+                result={result}
+                itemColors={itemColors}
+                textSizeScale={textSizeScale}
+                onTextScaleChange={setTextSizeScale}
+              />
 
-                {/* Ordered Production Cut List Table & CNC Rules (Right 5 Columns) */}
-                <div className="xl:col-span-5 space-y-4">
-                  <div className="rounded-xl border bg-card p-4 shadow-sm">
-                    <div className="flex items-center justify-between border-b pb-2 mb-3">
-                      <div className="flex items-center gap-2">
-                        <ListOrdered className="size-4 text-primary" />
-                        <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">
-                          Ordered Cut List ({thickness}mm Grade)
-                        </h4>
-                      </div>
-                      <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-600 font-bold px-2 py-0.5 rounded border border-emerald-500/20">
-                        Minimized Travel
-                      </span>
-                    </div>
-
-                    <div className="overflow-y-auto max-h-[420px] space-y-2 pr-1 scrollbar-thin">
-                      {sheets.flatMap((s) => {
-                        const seq = generateCuttingSequence(s);
-                        return seq.operations.map((op: import("@/lib/cutting-sequence").CuttingOperation) => ({ sheetId: s.id, ...op }));
-                      }).map((op) => {
-                        const badge = formatCutTypeBadge(op.segment.type, op.segment.guillotineStage);
-
-                        return (
-                          <div
-                            key={`${op.sheetId}-${op.sequenceNumber}`}
-                            className="rounded-lg border bg-muted/20 p-2.5 hover:bg-muted/40 transition-colors text-xs space-y-1"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="grid size-5 place-items-center rounded bg-primary text-white font-mono font-bold text-[10px]">
-                                  #{op.sequenceNumber}
-                                </span>
-                                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                                  Sheet {op.sheetId}
-                                </span>
-                                <span className={cn("text-[9.5px] font-bold px-1.5 py-0.5 rounded border font-mono", badge.bg)}>
-                                  {badge.label}
-                                </span>
-                              </div>
-                              <span className="font-mono text-[11px] font-bold text-foreground">
-                                {op.cutLength} mm
-                              </span>
-                            </div>
-
-                            <p className="text-[11px] text-muted-foreground leading-normal font-medium">
-                              {op.instruction}
-                            </p>
-
-                            <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/50 font-mono">
-                              <span>Pierce: ({op.piercePoint.x}, {op.piercePoint.y})</span>
-                              <span>End: ({op.endPoint.x}, {op.endPoint.y})</span>
-                              <span className="text-rose-500 font-semibold">Traverse: {op.rapidTraverseDistance}mm</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border bg-card p-4 shadow-sm space-y-2 text-xs">
-                    <div className="flex items-center gap-2 border-b pb-2">
-                      <Scissors className="size-3.5 text-emerald-600 dark:text-emerald-400" />
-                      <h5 className="font-bold text-xs text-foreground uppercase tracking-wider">
-                        Machine Cutting Parameters
-                      </h5>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="rounded-lg border p-2 bg-muted/20">
-                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Torch Cut Speed</p>
-                        <p className="font-bold text-primary mt-0.5">
-                          {Math.round(4500 / Math.sqrt(thickness))} mm/min
-                        </p>
-                      </div>
-                      <div className="rounded-lg border p-2 bg-muted/20">
-                        <p className="text-[9px] text-muted-foreground font-medium uppercase">Rapid Air Cut</p>
-                        <p className="font-bold text-foreground mt-0.5">18,000 mm/min</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              {/* Plate Types & Stock Dimensions Mapping for this Specific Plate Category */}
+              <PlateTypeInventorySection
+                filterCategory={g.isChq ? "chq" : "normal"}
+                className="mt-6 border-muted bg-muted/10 shadow-none"
+              />
             </div>
           ))}
       </div>

@@ -96,7 +96,13 @@ function ParsePage() {
     const q = query.trim().toLowerCase();
     const filtered = parts.filter(
       (p) =>
-        (material === "all" || p.material === material) &&
+        (material === "all"
+          ? true
+          : material === "chq"
+          ? /chq|cheq|chequered|3502/i.test(`${p.material} ${p.description} ${p.item}`)
+          : material === "normal"
+          ? !/chq|cheq|chequered|3502/i.test(`${p.material} ${p.description} ${p.item}`)
+          : p.material === material) &&
         (!q ||
           `${p.item} ${p.description} ${p.material} ${p.thickness}`.toLowerCase().includes(q)),
     );
@@ -297,17 +303,24 @@ function ParsePage() {
               className="pl-9"
             />
           </div>
-          <Select value={material} onValueChange={setMaterial}>
-            <SelectTrigger className="sm:w-[220px]">
+          <Select
+            value={material}
+            onValueChange={(val) => setMaterial(val)}
+          >
+            <SelectTrigger className="sm:w-[240px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All materials</SelectItem>
-              {materials.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
+              <SelectItem value="all">All Material Categories</SelectItem>
+              <SelectItem value="chq">🟡 Chequered Plates (IS 3502)</SelectItem>
+              <SelectItem value="normal">🔵 Normal MS Plates (IS 2062)</SelectItem>
+              {materials
+                .filter((m) => !/chq|3502/i.test(m))
+                .map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
           <span className="text-sm font-medium text-muted-foreground">{rows.length} rows</span>

@@ -81,10 +81,12 @@ export async function parseExcelFile(file: File): Promise<{
     }
 
     let material = rawMat.toUpperCase();
-    if (!material || material === "---" || material === "NULL" || material === "UNDEFINED") {
-      if (/CHQ|CHEQ|CHEQUERED/i.test(description)) {
+    const isChqInDesc = /CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|IS 3502/i.test(description) || /CHQ|CHEQ|CHEQUERED|CHECKERED/i.test(item);
+
+    if (!material || material === "---" || material === "NULL" || material === "UNDEFINED" || (isChqInDesc && !/CHQ|CHEQ|CHEQUERED|3502/i.test(material))) {
+      if (isChqInDesc) {
         material = "IS:3502 (Chequered Plate)";
-      } else {
+      } else if (!material || material === "---" || material === "NULL" || material === "UNDEFINED") {
         material = "IS:2062 E250A";
       }
     }
