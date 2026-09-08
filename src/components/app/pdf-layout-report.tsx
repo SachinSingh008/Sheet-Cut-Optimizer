@@ -3,6 +3,7 @@ import { Printer, ArrowLeft, ZoomIn, ZoomOut, Type, RotateCw } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import type { OptimizationResult, NestedSheet } from "@/lib/nesting";
 import { generateCuttingSequence } from "@/lib/cutting-sequence";
+import { useAppState } from "@/lib/store";
 
 interface PdfLayoutReportProps {
   result: OptimizationResult;
@@ -10,6 +11,7 @@ interface PdfLayoutReportProps {
 }
 
 export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
+  const { file } = useAppState();
   const reportRef = useRef<HTMLDivElement>(null);
   const [pdfTextScale, setPdfTextScale] = useState<number>(1.2); // Default text scale
   const [orientation, setOrientation] = useState<"standing" | "sleeping">("standing"); // Standing vertical by default
@@ -106,10 +108,10 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
           )}
           <div>
             <h2 className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
-              <span>Cut List Optimizer PDF Fabrication Report</span>
+              <span>Cut List Optimizer PDF Report {file?.name ? `— ${file.name}` : ""}</span>
             </h2>
             <p className="text-[11px] text-slate-400 hidden sm:block">
-              Standing vertical plate drawings (1250×6000mm) · Maximum drawing area & legibility
+              {file?.name ? `Source: ${file.name} · ` : ""}Standing vertical plate drawings (1250×6000mm) · Maximum drawing area & legibility
             </p>
           </div>
         </div>
@@ -201,9 +203,16 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
           {/* Cover Header */}
           <div className="border-b-2 border-slate-900 pb-3 mb-4">
             <div className="flex items-center justify-between mb-2">
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-                SteelNest AI — Industrial Fabrication Cut List Report
-              </h1>
+              <div>
+                <h1 className="text-lg font-bold text-slate-900 tracking-tight">
+                  SteelNest AI — Industrial Fabrication Cut List Report
+                </h1>
+                {file?.name ? (
+                  <p className="text-xs font-semibold text-slate-600 mt-0.5">
+                    Source Document / Model: <span className="font-mono text-slate-900 font-bold">{file.name}</span> ({result.sheets.length} Sheets Nested)
+                  </p>
+                ) : null}
+              </div>
               <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 Powered by 1810 Systems
               </span>

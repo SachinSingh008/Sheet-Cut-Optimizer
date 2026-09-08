@@ -46,7 +46,7 @@ export const Route = createFileRoute("/_app/reports")({
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 function ReportsPage() {
-  const { parts, result } = useAppState();
+  const { parts, result, file } = useAppState();
   const [showPdfModal, setShowPdfModal] = useState(false);
 
   const materialData = useMemo(() => {
@@ -125,8 +125,8 @@ function ReportsPage() {
 
       <PageHeader
         eyebrow="STEP 5"
-        title="Reports & Exports"
-        description="Shop-floor ready documentation: material summary, scrap analysis and printable PDF cut list."
+        title={file?.name ? `Reports & Exports — ${file.name}` : "Reports & Exports"}
+        description={`${file?.name ? `${file.name} · ` : ""}Shop-floor ready documentation: material summary, scrap analysis and printable PDF cut list.`}
         actions={
           <>
             <Button variant="outline" onClick={() => download("Excel")}>

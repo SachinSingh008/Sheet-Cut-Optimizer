@@ -29,9 +29,49 @@ export const Route = createFileRoute("/_app/layouts")({
 });
 
 function LayoutsPage() {
-  const { result, parts, config } = useAppState();
+  const { result, parts, config, file, isOptimizing, progress, progressMessage } = useAppState();
   const [index, setIndex] = useState(0);
   const [showPdfModal, setShowPdfModal] = useState(false);
+
+  if (isOptimizing) {
+    return (
+      <PageTransition>
+        <PageHeader
+          eyebrow="STEP 4"
+          title={file?.name ? `Generating Cut Layouts — ${file.name}` : "Generating Cut Layouts..."}
+          description="AI optimization engine is nesting parts onto standard stock plates..."
+        />
+        <div className="mt-8 mx-auto max-w-xl rounded-3xl border border-primary/25 bg-card/90 p-8 shadow-xl text-center space-y-5">
+          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-primary/10 text-primary ring-4 ring-primary/5">
+            <Sparkles className="size-8 animate-spin text-primary" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-foreground">
+              Generating Optimized Plate Layouts...
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">
+              {progressMessage || "Calculating optimal item placements..."}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs font-semibold">
+              <span className="text-muted-foreground">Progress</span>
+              <span className="text-primary font-mono">{progress}%</span>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-gradient-to-r from-primary to-emerald-500 transition-all duration-300 rounded-full"
+                style={{ width: `${Math.max(progress, 5)}%` }}
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Using adaptive population-based genetic algorithm to minimize plate count and maximize yield.
+          </p>
+        </div>
+      </PageTransition>
+    );
+  }
 
   if (!result) {
     return (
@@ -43,7 +83,7 @@ function LayoutsPage() {
           action={
             <div className="flex gap-3">
               {parts.length ? (
-                <Button onClick={() => store.set({ result: optimize(parts, config) })}>
+                <Button onClick={() => store.runOptimization()}>
                   <Sparkles className="mr-1.5 size-4" /> Generate Layouts
                 </Button>
               ) : (
@@ -66,8 +106,8 @@ function LayoutsPage() {
 
       <PageHeader
         eyebrow="STEP 4"
-        title="Cut Layouts & Plate Blueprints"
-        description={`${result.sheets.length} nested plates · ${result.utilization.toFixed(1)}% average utilization · ${result.scrap.toFixed(1)}% scrap.`}
+        title={file?.name ? `Cut Layouts & Plate Blueprints — ${file.name}` : "Cut Layouts & Plate Blueprints"}
+        description={`${file?.name ? `${file.name} · ` : ""}${result.sheets.length} nested plates · ${result.utilization.toFixed(1)}% average utilization · ${result.scrap.toFixed(1)}% scrap.`}
         actions={
           <div className="flex items-center gap-3">
             <Button

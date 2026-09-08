@@ -18,6 +18,7 @@ import {
   Scissors,
   Plus,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
@@ -70,7 +71,7 @@ export const Route = createFileRoute("/_app/parse")({
 type SortKey = "item" | "material" | "thickness" | "length" | "width" | "qty" | "weight";
 
 function ParsePage() {
-  const { parts, rejectedParts, result, config } = useAppState();
+  const { file, parts, rejectedParts, result, config, isOptimizing, progress } = useAppState();
   const [query, setQuery] = useState("");
   const [material, setMaterial] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "item", dir: 1 });
@@ -157,8 +158,12 @@ function ParsePage() {
 
       <PageHeader
         eyebrow="STEP 2"
-        title="Parse Results"
-        description="Validated BOM line items with interactive plate cut diagrams and cutting instructions."
+        title={file?.name ? `Parse Results — ${file.name}` : "Parse Results"}
+        description={
+          file?.name
+            ? `Extracted ${parts.length} line items from ${file.name}. Interactive plate cut diagrams and cutting sequence ready.`
+            : "Validated BOM line items with interactive plate cut diagrams and cutting instructions."
+        }
         actions={
           <div className="flex items-center gap-3">
             {result && (
@@ -170,9 +175,21 @@ function ParsePage() {
                 <FileText className="mr-1.5 size-4" /> Download / Export PDF
               </Button>
             )}
-            <Button asChild size="lg" variant="outline">
+            <Button asChild size="lg" className={isOptimizing ? "border-primary text-primary" : ""}>
               <Link to="/layouts">
-                View Cut Layouts <ArrowRight className="ml-1.5 size-4" />
+                {isOptimizing ? (
+                  <>
+                    <Sparkles className="mr-1.5 size-4 animate-spin" /> Nesting Plates ({progress}%)...
+                  </>
+                ) : result ? (
+                  <>
+                    View Cut Layouts ({result.sheets.length} Sheets) <ArrowRight className="ml-1.5 size-4" />
+                  </>
+                ) : (
+                  <>
+                    Generate Cut Layouts <ArrowRight className="ml-1.5 size-4" />
+                  </>
+                )}
               </Link>
             </Button>
           </div>

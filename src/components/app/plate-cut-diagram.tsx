@@ -7,11 +7,13 @@ import {
   Minus,
   Plus,
   Move,
+  Sparkles,
 } from "lucide-react";
 import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { NestedSheet, OptimizationResult } from "@/lib/nesting";
+import { useAppState } from "@/lib/store";
 
 const LIGHT_COLOR_PALETTE = [
   "#93c5fd", // Soft Blue
@@ -468,14 +470,14 @@ function ThicknessGroupCanvas({
                       const color = itemColors.get(p.part.item) || "#93c5fd";
                       const isSelected = selectedPartKey === p.key;
 
-                      const baseItemFontSize = Math.max(14, Math.min(p.w / 7, p.h / 3.5, 42));
-                      const baseEdgeFontSize = Math.max(12, Math.min(p.w / 9, p.h / 5, 28));
+                      const baseItemFontSize = Math.max(9, Math.min(p.w / (Math.max(p.part.item.length, 3) * 0.65), p.h / 2.5, 38));
+                      const baseEdgeFontSize = Math.max(9, Math.min(p.w / 9, p.h / 5, 24));
 
                       const itemFontSize = baseItemFontSize * textSizeScale;
                       const edgeFontSize = baseEdgeFontSize * textSizeScale;
 
-                      const showHoriz = p.w > 35;
-                      const showVert = p.h > 25;
+                      const showHoriz = p.w >= 45 && p.h >= 35;
+                      const showVert = p.h >= 45 && p.w >= 35;
 
                       return (
                         <g
@@ -671,8 +673,29 @@ function ThicknessGroupCanvas({
 }
 
 export function PlateCutDiagramSection({ result }: { result: OptimizationResult | null }) {
+  const { isOptimizing, progress, progressMessage } = useAppState();
   const [textSizeScale, setTextSizeScale] = useState(1.0);
   const [activeGroupFilter, setActiveGroupFilter] = useState<string | "all">("all");
+
+  if (isOptimizing) {
+    return (
+      <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6 text-center space-y-3">
+        <Sparkles className="size-5 mx-auto text-primary animate-spin" />
+        <h4 className="text-sm font-bold text-foreground">
+          AI Cutting Layouts In Progress ({progress}%)...
+        </h4>
+        <p className="text-xs text-muted-foreground font-mono">
+          {progressMessage || "Calculating optimal cut placements..."}
+        </p>
+        <div className="max-w-md mx-auto h-2 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary transition-all duration-300"
+            style={{ width: `${Math.max(progress, 5)}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (!result || !result.sheets.length) {
     return (

@@ -110,10 +110,10 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
     cutLengthPenalty: 0.2,
     reusableRemnantBonus: 25.0,
     fragmentedWastePenalty: 15.0,
-    cutContinuityBonus: 15.0,
+    cutContinuityBonus: 35.0, // High bonus for continuous straight shear lines
     packingDensityBonus: 10.0,
-    rotationPenalty: 2.0,
-    stripAlignmentBonus: 15.0,
+    rotationPenalty: 0.5,     // Low rotation penalty: allow rotation freely for optimal fit
+    stripAlignmentBonus: 40.0, // High bonus for same-width / same-height part strips
   },
   "max-yield": {
     materialUtilization: 5.0,
@@ -121,10 +121,10 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
     cutLengthPenalty: 0.1,
     reusableRemnantBonus: 50.0,
     fragmentedWastePenalty: 30.0,
-    cutContinuityBonus: 20.0,
+    cutContinuityBonus: 40.0,
     packingDensityBonus: 20.0,
-    rotationPenalty: 1.0,
-    stripAlignmentBonus: 20.0,
+    rotationPenalty: 0.5,
+    stripAlignmentBonus: 45.0,
   },
   "guillotine-shear": {
     materialUtilization: 2.0,
@@ -132,10 +132,10 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
     cutLengthPenalty: 0.5,
     reusableRemnantBonus: 30.0,
     fragmentedWastePenalty: 20.0,
-    cutContinuityBonus: 50.0, // High bonus for continuous straight shear lines
+    cutContinuityBonus: 60.0, // Maximum bonus for continuous straight shear lines
     packingDensityBonus: 10.0,
-    rotationPenalty: 5.0,
-    stripAlignmentBonus: 40.0, // High bonus for matching strip heights
+    rotationPenalty: 0.5,
+    stripAlignmentBonus: 60.0, // Maximum bonus for matching strip heights
   },
 };
 
@@ -539,6 +539,7 @@ export type PackingItem = { part: Part; w: number; h: number; rotated: boolean }
 
 /** GRASP Ordering Policies */
 export type GRASPPolicy =
+  | "same-type-clustered"
   | "area-descending"
   | "area-ascending"
   | "longest-side"
@@ -551,6 +552,7 @@ export type GRASPPolicy =
   | "weighted-random";
 
 export const ALL_GRASP_POLICIES: GRASPPolicy[] = [
+  "same-type-clustered",
   "area-descending",
   "area-ascending",
   "longest-side",
@@ -671,6 +673,13 @@ export function evaluateItemPolicyMetric(item: PackingItem, policy: GRASPPolicy)
 function sortItemsByPolicy(items: PackingItem[], policy: GRASPPolicy): PackingItem[] {
   const list = items.slice();
   switch (policy) {
+    case "same-type-clustered":
+      return list.sort(
+        (a, b) =>
+          a.part.item.localeCompare(b.part.item) ||
+          b.w * b.h - a.w * a.h ||
+          Math.max(b.w, b.h) - Math.max(a.w, a.h)
+      );
     case "area-descending":
       return list.sort((a, b) => b.w * b.h - a.w * a.h || Math.max(b.w, b.h) - Math.max(a.w, a.h));
     case "area-ascending":
@@ -1023,7 +1032,7 @@ function splitFreeRectangleSet(
  * Ultra-Fast High-Yield MaxRects Bin Packing Engine.
  * Evaluates candidates using global Best-Fit-Decreasing (BFD) and dynamic multi-rule scoring.
  */
-function packSingleSheetMaxRectsBFD(
+export function packSingleSheetMaxRectsBFD(
   items: PackingItem[],
   curSheetLength: number,
   curSheetWidth: number,
@@ -1368,7 +1377,7 @@ function calculateFreeRectanglesForSheet(sheet: NestedSheet, config: Optimizatio
  * Fast Inter-Sheet Re-compactor & Partial Waste Back-Filling.
  * Transfers parts from low-utilization last sheets to scrap spaces of earlier sheets.
  */
-function postOptimizationRecompact(sheets: NestedSheet[], config: OptimizationConfig): NestedSheet[] {
+export function postOptimizationRecompact(sheets: NestedSheet[], config: OptimizationConfig): NestedSheet[] {
   if (sheets.length <= 1) return sheets;
 
   let currentSheets = sheets.map((s) => ({
@@ -1392,6 +1401,14 @@ function postOptimizationRecompact(sheets: NestedSheet[], config: OptimizationCo
       ...s,
       placed: s.placed.map((p) => ({ ...p })),
     }));
+
+    // Feasibility check: if candidate area exceeds available free area in prior sheets, elimination is impossible
+    const totalCandidateArea = candidateParts.reduce((a, p) => a + p.w * p.h, 0);
+    const availableFreeArea = tempSheets.reduce(
+      (a, s) => a + (s.sheetLength * s.sheetWidth - s.usedArea),
+      0
+    );
+    if (totalCandidateArea > availableFreeArea) break;
 
     let allPlacedSuccessfully = true;
 
@@ -1710,9 +1727,166 @@ function evaluateGenome(
 }
 
 /**
- * Industrial Guillotine-Shelf Grid Sheet Packer.
- * Packs parts into uniform horizontal/vertical strips (shelves) to eliminate staircase fragmentation,
- * achieving commercial CutList Optimizer packing density (92-96%+ yield per sheet).
+ * Industrial Guillotine Vertical Column Strip Packer.
+ * Aligns parts of matching width or identical item marks into continuous vertical columns along Y.
+ * Enables ONE long vertical guillotine cut to separate the entire column strip, followed by small horizontal cross cuts.
+ * Dynamically tests 0° and 90° rotation for every individual part to match the column width.
+ */
+export function packGuillotineColumnSheet(
+  items: PackingItem[],
+  curSheetLength: number,
+  curSheetWidth: number,
+  config: OptimizationConfig,
+  material: string,
+  thickness: number,
+  sheetIdPrefix: string = "COL"
+): NestedSheet[] {
+  const trim = config.trim;
+  const kerf = config.kerf;
+  const usableL = curSheetLength - trim * 2;
+  const usableW = curSheetWidth - trim * 2;
+
+  let remainingQueue = items.slice();
+  const sheets: NestedSheet[] = [];
+
+  while (remainingQueue.length > 0) {
+    const sheetId = `${sheetIdPrefix}-${sheets.length + 1}`;
+    const placed: PlacedPart[] = [];
+    let currentX = trim;
+    let usedArea = 0;
+    let index = 0;
+
+    while (currentX < curSheetLength - trim && remainingQueue.length > 0) {
+      const remainingSpaceW = curSheetLength - trim - currentX;
+      if (remainingSpaceW <= 0) break;
+
+      // Frequency map of candidate widths to pick the most common column width
+      const widthFreq = new Map<number, number>();
+      for (const item of remainingQueue) {
+        if (item.w <= remainingSpaceW && item.h <= usableW) {
+          widthFreq.set(item.w, (widthFreq.get(item.w) || 0) + 1);
+        }
+        if (config.rotation && item.w !== item.h && item.h <= remainingSpaceW && item.w <= usableW) {
+          widthFreq.set(item.h, (widthFreq.get(item.h) || 0) + 1);
+        }
+      }
+
+      let colWidth = 0;
+      let maxFreq = 0;
+      for (const [wCandidate, freq] of widthFreq) {
+        if (freq > maxFreq || (freq === maxFreq && wCandidate > colWidth)) {
+          maxFreq = freq;
+          colWidth = wCandidate;
+        }
+      }
+
+      if (colWidth <= 0) {
+        for (let i = 0; i < remainingQueue.length; i++) {
+          const item = remainingQueue[i]!;
+          if (item.w <= remainingSpaceW && item.h <= usableW && item.w > colWidth) {
+            colWidth = item.w;
+          }
+          if (config.rotation && item.h <= remainingSpaceW && item.w <= usableW && item.h > colWidth) {
+            colWidth = item.h;
+          }
+        }
+      }
+
+      if (colWidth <= 0) break;
+
+      let currentY = trim;
+      let lastPlacedItem: PackingItem | null = null;
+
+      // Fill this vertical column (x: currentX, width: colWidth) along Y
+      while (currentY < curSheetWidth - trim && remainingQueue.length > 0) {
+        const remainingSpaceH = curSheetWidth - trim - currentY;
+        if (remainingSpaceH <= 0) break;
+
+        let bestItemIdx = -1;
+        let bestW = 0;
+        let bestH = 0;
+        let bestRotated = false;
+        let bestScore = Infinity;
+
+        for (let i = 0; i < remainingQueue.length; i++) {
+          const item = remainingQueue[i]!;
+          const canRotate = config.rotation && item.w !== item.h;
+
+          let orientations = [{ w: item.w, h: item.h, rotated: item.rotated }];
+          if (canRotate) {
+            orientations.push({ w: item.h, h: item.w, rotated: !item.rotated });
+          }
+
+          for (const orient of orientations) {
+            if (orient.w <= colWidth && orient.h <= remainingSpaceH) {
+              const widthGap = colWidth - orient.w;
+              const heightLeftover = remainingSpaceH - orient.h;
+
+              // Heavy bonus if width matches colWidth EXACTLY (creates 100% straight continuous vertical cut line!)
+              const exactWidthBonus = orient.w === colWidth ? -80000 : 0;
+              // Bonus if same part mark / name as previous item in this column (keeps same parts in same line!)
+              const sameItemBonus = (lastPlacedItem && lastPlacedItem.part.item === item.part.item) ? -30000 : 0;
+              // Bonus if same dimensions as previous item
+              const sameDimBonus = (lastPlacedItem && lastPlacedItem.w === orient.w && lastPlacedItem.h === orient.h) ? -15000 : 0;
+
+              const score = widthGap * 2000 + heightLeftover + exactWidthBonus + sameItemBonus + sameDimBonus;
+
+              if (score < bestScore) {
+                bestScore = score;
+                bestItemIdx = i;
+                bestW = orient.w;
+                bestH = orient.h;
+                bestRotated = orient.rotated;
+              }
+            }
+          }
+        }
+
+        if (bestItemIdx === -1) break;
+
+        const chosen = remainingQueue[bestItemIdx]!;
+        placed.push({
+          key: `${sheetId}-${index}`,
+          part: chosen.part,
+          x: currentX,
+          y: currentY,
+          w: bestW,
+          h: bestH,
+          rotated: bestRotated,
+          index: index++,
+        });
+
+        usedArea += bestW * bestH;
+        currentY += bestH + kerf;
+        lastPlacedItem = { ...chosen, w: bestW, h: bestH, rotated: bestRotated };
+        remainingQueue.splice(bestItemIdx, 1);
+      }
+
+      currentX += colWidth + kerf;
+    }
+
+    if (placed.length === 0) break;
+
+    sheets.push({
+      id: sheetId,
+      material,
+      thickness,
+      sheetLength: curSheetLength,
+      sheetWidth: curSheetWidth,
+      placed,
+      usedArea,
+      utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+    });
+  }
+
+  return sheets;
+}
+
+/**
+ * Industrial Guillotine Horizontal Shelf Strip Packer.
+ * Aligns parts into uniform horizontal strips (shelves) to eliminate fragmentation.
+ * Enables ONE long horizontal guillotine cut to separate the shelf strip, followed by small vertical cuts.
+ * Dynamically tests 0° and 90° rotation for every individual part to match shelf height.
  */
 export function packGuillotineShelfSheet(
   items: PackingItem[],
@@ -1738,44 +1912,46 @@ export function packGuillotineShelfSheet(
     let usedArea = 0;
     let index = 0;
 
-    // While there is vertical room on the current sheet for a new shelf
     while (currentY < curSheetWidth - trim && remainingQueue.length > 0) {
       const remainingSpaceH = curSheetWidth - trim - currentY;
       if (remainingSpaceH <= 0) break;
 
-      // Find the item that defines the height of the new shelf
-      let shelfHeight = 0;
-      let shelfItemIdx = -1;
-
-      for (let i = 0; i < remainingQueue.length; i++) {
-        const item = remainingQueue[i]!;
-        const canRotate = config.rotation && item.w !== item.h;
-
-        let h1 = item.h;
-        let w1 = item.w;
-        if (h1 <= remainingSpaceH && w1 <= usableL) {
-          if (h1 > shelfHeight) {
-            shelfHeight = h1;
-            shelfItemIdx = i;
-          }
+      const heightFreq = new Map<number, number>();
+      for (const item of remainingQueue) {
+        if (item.h <= remainingSpaceH && item.w <= usableL) {
+          heightFreq.set(item.h, (heightFreq.get(item.h) || 0) + 1);
         }
-        if (canRotate) {
-          let h2 = item.w;
-          let w2 = item.h;
-          if (h2 <= remainingSpaceH && w2 <= usableL) {
-            if (h2 > shelfHeight) {
-              shelfHeight = h2;
-              shelfItemIdx = i;
-            }
+        if (config.rotation && item.w !== item.h && item.w <= remainingSpaceH && item.h <= usableL) {
+          heightFreq.set(item.w, (heightFreq.get(item.w) || 0) + 1);
+        }
+      }
+
+      let shelfHeight = 0;
+      let maxFreq = 0;
+      for (const [hCandidate, freq] of heightFreq) {
+        if (freq > maxFreq || (freq === maxFreq && hCandidate > shelfHeight)) {
+          maxFreq = freq;
+          shelfHeight = hCandidate;
+        }
+      }
+
+      if (shelfHeight <= 0) {
+        for (let i = 0; i < remainingQueue.length; i++) {
+          const item = remainingQueue[i]!;
+          if (item.h <= remainingSpaceH && item.w <= usableL && item.h > shelfHeight) {
+            shelfHeight = item.h;
+          }
+          if (config.rotation && item.w <= remainingSpaceH && item.h <= usableL && item.w > shelfHeight) {
+            shelfHeight = item.w;
           }
         }
       }
 
-      if (shelfItemIdx === -1 || shelfHeight <= 0) break;
+      if (shelfHeight <= 0) break;
 
       let currentX = trim;
+      let lastPlacedItem: PackingItem | null = null;
 
-      // Fill this shelf (height = shelfHeight) along currentX up to curSheetLength - trim
       while (currentX < curSheetLength - trim && remainingQueue.length > 0) {
         const remainingSpaceW = curSheetLength - trim - currentX;
         if (remainingSpaceW <= 0) break;
@@ -1799,7 +1975,12 @@ export function packGuillotineShelfSheet(
             if (orient.w <= remainingSpaceW && orient.h <= shelfHeight) {
               const heightGap = shelfHeight - orient.h;
               const widthLeftover = remainingSpaceW - orient.w;
-              const score = heightGap * 1000 + widthLeftover;
+
+              const exactHeightBonus = orient.h === shelfHeight ? -80000 : 0;
+              const sameItemBonus = (lastPlacedItem && lastPlacedItem.part.item === item.part.item) ? -30000 : 0;
+              const sameDimBonus = (lastPlacedItem && lastPlacedItem.w === orient.w && lastPlacedItem.h === orient.h) ? -15000 : 0;
+
+              const score = heightGap * 2000 + widthLeftover + exactHeightBonus + sameItemBonus + sameDimBonus;
 
               if (score < bestScore) {
                 bestScore = score;
@@ -1828,6 +2009,7 @@ export function packGuillotineShelfSheet(
 
         usedArea += bestW * bestH;
         currentX += bestW + kerf;
+        lastPlacedItem = { ...chosen, w: bestW, h: bestH, rotated: bestRotated };
         remainingQueue.splice(bestItemIdx, 1);
       }
 
@@ -2087,24 +2269,41 @@ export function solveBucketPopulation(
   converged: boolean;
 } {
   const preset = config.preset ?? "balanced";
-  const popSize = config.populationSize ?? 100; // Maintain 100 candidate layouts
+  const count = queueItems.length;
 
-  let maxGens = config.generations;
-  let stagnantLimit = 8;
+  // Dynamically scale population and generations based on bucket item count
+  // to deliver blazing performance (<5s) while preserving elite layout quality.
+  let defaultPopSize = 30;
+  let defaultMaxGens = 10;
+  let defaultStagnantLimit = 4;
+
+  if (count > 250) {
+    defaultPopSize = preset === "max-yield" ? 12 : 8;
+    defaultMaxGens = preset === "max-yield" ? 4 : 2;
+    defaultStagnantLimit = 2;
+  } else if (count > 100) {
+    defaultPopSize = preset === "max-yield" ? 18 : 10;
+    defaultMaxGens = preset === "max-yield" ? 6 : 3;
+    defaultStagnantLimit = 2;
+  } else if (count > 40) {
+    defaultPopSize = preset === "max-yield" ? 28 : 16;
+    defaultMaxGens = preset === "max-yield" ? 8 : 4;
+    defaultStagnantLimit = 3;
+  } else {
+    defaultPopSize = preset === "max-yield" ? 40 : 25;
+    defaultMaxGens = preset === "max-yield" ? 15 : 8;
+    defaultStagnantLimit = 3;
+  }
 
   if (preset === "fast") {
-    maxGens = maxGens ?? 15;
-    stagnantLimit = 5;
-  } else if (preset === "max-yield") {
-    maxGens = maxGens ?? 75;
-    stagnantLimit = 15;
-  } else if (preset === "guillotine-shear") {
-    maxGens = maxGens ?? 35;
-    stagnantLimit = 8;
-  } else {
-    maxGens = maxGens ?? 35;
-    stagnantLimit = 8;
+    defaultPopSize = Math.min(defaultPopSize, 8);
+    defaultMaxGens = Math.min(defaultMaxGens, 2);
+    defaultStagnantLimit = 2;
   }
+
+  const popSize = config.populationSize ?? defaultPopSize;
+  const maxGens = config.generations ?? defaultMaxGens;
+  const stagnantLimit = defaultStagnantLimit;
 
   const convergenceThreshold = config.convergenceThreshold ?? 0.001;
   const eliteCount = Math.max(2, Math.floor(popSize * 0.15)); // Keep Elite top 15%
@@ -2288,8 +2487,110 @@ export function solveBucketPopulation(
     }
   }
 
-  // 3. Multi-Algorithm Evaluation: Evaluate Skyline Bottom-Left Engine across all ordering policies
-  for (const pol of staticPolicies) {
+  // 3. Multi-Algorithm Best-Fitting Evaluation Tournament:
+  // Evaluates Guillotine Columns, Guillotine Shelves, MaxRects BFD, and Skyline BL across multiple ordering policies
+  const tournamentPolicies: GRASPPolicy[] = [
+    "same-type-clustered",
+    "width-strip",
+    "height-strip",
+    "longest-side",
+    "area-descending",
+  ];
+
+  // Candidate A: Guillotine Column Strip Packer (One long vertical cut + small horizontal cross-cuts)
+  for (const pol of tournamentPolicies) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    const colRaw = packGuillotineColumnSheet(
+      sortedQueue,
+      curSheetLength,
+      curSheetWidth,
+      config,
+      material,
+      thickness,
+      "COL"
+    );
+    tryCandidateSheets(colRaw);
+  }
+
+  // Candidate B: Guillotine Shelf Strip Packer (One long horizontal cut + small vertical cross-cuts)
+  for (const pol of tournamentPolicies) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    const shelfRaw = packGuillotineShelfSheet(
+      sortedQueue,
+      curSheetLength,
+      curSheetWidth,
+      config,
+      material,
+      thickness,
+      "SHELF"
+    );
+    tryCandidateSheets(shelfRaw);
+  }
+
+  // Candidate C: MaxRects BFD with Same-Width-Strip (for continuous collinear boundaries)
+  for (const pol of tournamentPolicies.slice(0, 3)) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    let rem = sortedQueue.slice();
+    const bfdStripSheets: NestedSheet[] = [];
+    while (rem.length > 0) {
+      const sid = `BFD-STRIP-${bfdStripSheets.length + 1}`;
+      const { placed, unplaced, usedArea } = packSingleSheetMaxRectsBFD(
+        rem,
+        curSheetLength,
+        curSheetWidth,
+        config,
+        sid,
+        "same-width-strip"
+      );
+      if (!placed.length) break;
+      bfdStripSheets.push({
+        id: sid,
+        material,
+        thickness,
+        sheetLength: curSheetLength,
+        sheetWidth: curSheetWidth,
+        placed,
+        usedArea,
+        utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+      });
+      rem = unplaced;
+    }
+    tryCandidateSheets(bfdStripSheets);
+  }
+
+  // Candidate D: MaxRects BFD with Guillotine-Aligned
+  for (const pol of tournamentPolicies.slice(0, 3)) {
+    const sortedQueue = sortItemsByPolicy(queueItems, pol);
+    let rem = sortedQueue.slice();
+    const bfdGuillSheets: NestedSheet[] = [];
+    while (rem.length > 0) {
+      const sid = `BFD-GUILL-${bfdGuillSheets.length + 1}`;
+      const { placed, unplaced, usedArea } = packSingleSheetMaxRectsBFD(
+        rem,
+        curSheetLength,
+        curSheetWidth,
+        config,
+        sid,
+        "guillotine-aligned"
+      );
+      if (!placed.length) break;
+      bfdGuillSheets.push({
+        id: sid,
+        material,
+        thickness,
+        sheetLength: curSheetLength,
+        sheetWidth: curSheetWidth,
+        placed,
+        usedArea,
+        utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+      });
+      rem = unplaced;
+    }
+    tryCandidateSheets(bfdGuillSheets);
+  }
+
+  // Candidate E: Skyline Bottom-Left Engine with gap backfilling
+  for (const pol of tournamentPolicies.slice(0, 3)) {
     const sortedQueue = sortItemsByPolicy(queueItems, pol);
     const skylineRaw = packSkylineSheet(
       sortedQueue,
@@ -2303,30 +2604,17 @@ export function solveBucketPopulation(
     tryCandidateSheets(skylineRaw);
   }
 
-  // 4. Multi-Algorithm Evaluation: Evaluate MaxRects BFD Engine across all ordering policies & heuristics
-  const bfdSheetsRaw = solveBucketMinSheets(
-    queueItems,
-    curSheetLength,
-    curSheetWidth,
-    config,
-    material,
-    thickness
-  );
-  tryCandidateSheets(bfdSheetsRaw);
-
-  // 5. Multi-Algorithm Evaluation: Evaluate Guillotine-Shelf Grid packing across all ordering policies
-  for (const pol of staticPolicies) {
-    const sortedQueue = sortItemsByPolicy(queueItems, pol);
-    const shelfSheetsRaw = packGuillotineShelfSheet(
-      sortedQueue,
+  // Candidate F: MaxRects BFD Standard Engine
+  if (queueItems.length <= 80) {
+    const bfdSheetsRaw = solveBucketMinSheets(
+      queueItems,
       curSheetLength,
       curSheetWidth,
       config,
       material,
-      thickness,
-      "SHELF"
+      thickness
     );
-    tryCandidateSheets(shelfSheetsRaw);
+    tryCandidateSheets(bfdSheetsRaw);
   }
 
   return {
@@ -2630,27 +2918,36 @@ export function evaluateLayoutMetrics(
       for (let j = i + 1; j < placed.length; j++) {
         const p2 = placed[j]!;
 
-        // Check horizontal collinear edge sharing
-        if (Math.abs(p1.y - p2.y) < 2 || Math.abs((p1.y + p1.h) - (p2.y + p2.h)) < 2) {
+        // Vertical column alignment (same x & matching width = continuous vertical cut)
+        if (Math.abs(p1.x - p2.x) <= config.kerf + 1 && Math.abs(p1.w - p2.w) <= 1) {
+          alignedStripCount++;
+          sharedEdgeLength += Math.min(p1.h, p2.h);
+        }
+        // Horizontal shelf alignment (same y & matching height = continuous horizontal cut)
+        if (Math.abs(p1.y - p2.y) <= config.kerf + 1 && Math.abs(p1.h - p2.h) <= 1) {
+          alignedStripCount++;
+          sharedEdgeLength += Math.min(p1.w, p2.w);
+        }
+
+        // Adjacent shared cross-cut in Y (touching across kerf)
+        if (
+          Math.abs((p1.y + p1.h + config.kerf) - p2.y) <= 2 ||
+          Math.abs((p2.y + p2.h + config.kerf) - p1.y) <= 2
+        ) {
           const overlapX = Math.max(0, Math.min(p1.x + p1.w, p2.x + p2.w) - Math.max(p1.x, p2.x));
-          if (overlapX > 5) {
+          if (overlapX > 2) {
             sharedEdgeLength += overlapX;
           }
         }
-        // Check vertical collinear edge sharing
-        if (Math.abs(p1.x - p2.x) < 2 || Math.abs((p1.x + p1.w) - (p2.x + p2.w)) < 2) {
+        // Adjacent shared cross-cut in X (touching across kerf)
+        if (
+          Math.abs((p1.x + p1.w + config.kerf) - p2.x) <= 2 ||
+          Math.abs((p2.x + p2.w + config.kerf) - p1.x) <= 2
+        ) {
           const overlapY = Math.max(0, Math.min(p1.y + p1.h, p2.y + p2.h) - Math.max(p1.y, p2.y));
-          if (overlapY > 5) {
+          if (overlapY > 2) {
             sharedEdgeLength += overlapY;
           }
-        }
-
-        // Check strip alignment (matching height/width)
-        if (
-          (Math.abs(p1.y - p2.y) < 2 && Math.abs(p1.h - p2.h) < 2) ||
-          (Math.abs(p1.x - p2.x) < 2 && Math.abs(p1.w - p2.w) < 2)
-        ) {
-          alignedStripCount++;
         }
       }
     }

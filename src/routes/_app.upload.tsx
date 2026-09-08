@@ -82,8 +82,6 @@ function UploadPage() {
   const [showEditTable, setShowEditTable] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
-  const [isDeepOptimizing, setIsDeepOptimizing] = useState(false);
-  const [optStep, setOptStep] = useState(0);
 
   // Restore Modal State
   const [restoringRejected, setRestoringRejected] = useState<RejectedPart | null>(null);
@@ -183,21 +181,11 @@ function UploadPage() {
 
   const confirmAndNavigate = () => {
     setShowVerifyModal(false);
-    setIsDeepOptimizing(true);
-    setOptStep(1);
-
-    setTimeout(() => setOptStep(2), 600);
-    setTimeout(() => setOptStep(3), 1200);
-    setTimeout(() => setOptStep(4), 1800);
-
-    setTimeout(() => {
-      store.runOptimization();
-      setIsDeepOptimizing(false);
-      toast.success("Deep Optimization Complete!", {
-        description: "Simulated 100+ annealing trials & post-recompaction. Generated lowest sheet count layout.",
-      });
-      navigate({ to: "/parse" });
-    }, 2400);
+    store.runOptimization();
+    toast.success("BOM Verified!", {
+      description: "Generating optimal plate cut layouts...",
+    });
+    navigate({ to: "/layouts" });
   };
 
   const handleSaveRestoredPart = () => {
@@ -750,16 +738,61 @@ function UploadPage() {
               Verify Extracted Content
             </DialogTitle>
             <DialogDescription className="text-center text-xs text-muted-foreground">
-              Have you verified whether all content and dimensions have been extracted properly from your Excel BOM file?
+              Please verify that all component names, dimensions, and quantities from your file are correctly detected.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300">
+          {/* Active File & Detected Parts Snapshot */}
+          <div className="rounded-xl border bg-muted/30 p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs border-b pb-2">
+              <span className="flex items-center gap-1.5 font-bold text-foreground">
+                <FileSpreadsheet className="size-4 text-emerald-600" />
+                {file?.name || "BOM File"}
+              </span>
+              <span className="font-mono text-[11px] bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded font-bold">
+                {parts.length} Items Detected
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+              <div>
+                <span className="text-muted-foreground font-sans">Total Qty:</span>{" "}
+                <strong className="text-foreground">{parts.reduce((s, p) => s + p.qty, 0).toLocaleString()} pcs</strong>
+              </div>
+              <div>
+                <span className="text-muted-foreground font-sans">Thicknesses:</span>{" "}
+                <strong className="text-primary">{Array.from(new Set(parts.map((p) => `${p.thickness}mm`))).join(", ") || "-"}</strong>
+              </div>
+            </div>
+            {/* Quick Part Marks Preview */}
+            <div className="pt-1">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                Detected Marks Sample:
+              </p>
+              <div className="flex flex-wrap gap-1 mt-1 max-h-16 overflow-y-auto">
+                {parts.slice(0, 8).map((p) => (
+                  <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 rounded bg-background border px-1.5 py-0.5 text-[10px] font-mono text-foreground shadow-2xs"
+                  >
+                    <span className="font-bold text-primary">{p.item}</span>
+                    <span className="text-muted-foreground text-[9px]">({p.length}×{p.width})</span>
+                  </span>
+                ))}
+                {parts.length > 8 ? (
+                  <span className="text-[10px] text-muted-foreground self-center pl-1 font-mono">
+                    +{parts.length - 8} more
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
             <p className="font-bold flex items-center gap-1.5">
               <Info className="size-4 shrink-0" /> Small Verification Note:
             </p>
-            <p className="mt-1 text-[11px] leading-relaxed">
-              Extractor algorithms can occasionally make mistakes or misalign columns if the Excel headers vary. Kindly double-check your total items, plate thickness values, and quantities carefully before nesting.
+            <p className="mt-0.5 text-[11px] leading-relaxed">
+              Kindly double-check your total items, plate thickness values, and quantities carefully before nesting.
             </p>
           </div>
 
@@ -903,53 +936,6 @@ function UploadPage() {
               <Plus className="size-4" /> Save & Move to Nesting
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Deep Optimization Progress Loader Modal */}
-      <Dialog open={isDeepOptimizing} onOpenChange={() => {}}>
-        <DialogContent className="max-w-md border-emerald-500/30 bg-slate-950 text-white dark:bg-slate-950">
-          <DialogHeader className="text-center">
-            <div className="mx-auto mb-3 grid size-14 place-items-center rounded-2xl bg-emerald-500/20 text-emerald-400 ring-4 ring-emerald-500/10 animate-pulse">
-              <Sparkles className="size-7 animate-spin text-emerald-400" />
-            </div>
-            <DialogTitle className="text-center text-xl font-extrabold text-white">
-              Running Deep Multi-Pass Optimization...
-            </DialogTitle>
-            <DialogDescription className="text-center text-xs text-slate-400 mt-1">
-              Executing 100+ stochastic annealing permutations & post-pass scrap compaction to achieve the absolute lowest sheet count.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-3">
-            <div className="space-y-2.5 text-xs">
-              <div className={cn("flex items-center gap-2.5 transition-colors", optStep >= 1 ? "text-emerald-400 font-semibold" : "text-slate-500")}>
-                <span className={cn("size-2 rounded-full", optStep >= 1 ? "bg-emerald-400 animate-ping" : "bg-slate-700")} />
-                <span>1. Analyzing BOM thickness & material grade buckets</span>
-              </div>
-              <div className={cn("flex items-center gap-2.5 transition-colors", optStep >= 2 ? "text-emerald-400 font-semibold" : "text-slate-500")}>
-                <span className={cn("size-2 rounded-full", optStep >= 2 ? "bg-emerald-400 animate-ping" : "bg-slate-700")} />
-                <span>2. Simulating 100+ stochastic item placement permutations</span>
-              </div>
-              <div className={cn("flex items-center gap-2.5 transition-colors", optStep >= 3 ? "text-emerald-400 font-semibold" : "text-slate-500")}>
-                <span className={cn("size-2 rounded-full", optStep >= 3 ? "bg-emerald-400 animate-ping" : "bg-slate-700")} />
-                <span>3. Evaluating Best Short Side (BSSF) & Guillotine splits</span>
-              </div>
-              <div className={cn("flex items-center gap-2.5 transition-colors", optStep >= 4 ? "text-emerald-400 font-semibold" : "text-slate-500")}>
-                <span className={cn("size-2 rounded-full", optStep >= 4 ? "bg-emerald-400 animate-ping" : "bg-slate-700")} />
-                <span>4. Squeezing remnants & eliminating extra sheets</span>
-              </div>
-            </div>
-
-            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
-              <motion.div
-                className="h-full bg-emerald-500"
-                initial={{ width: "0%" }}
-                animate={{ width: `${(optStep / 4) * 100}%` }}
-                transition={{ duration: 0.5 }}
-              />
-            </div>
-          </div>
         </DialogContent>
       </Dialog>
     </PageTransition>

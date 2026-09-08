@@ -159,20 +159,41 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
                         setSelected(isSel ? null : p.key);
                       }}
                     />
-                    {p.w > 120 && p.h > 60 ? (
-                      <text
-                        x={p.x + p.w / 2}
-                        y={p.y + p.h / 2}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fill="#ffffff"
-                        fontSize={Math.max(12, Math.min(p.w / 8, p.h / 4, 32))}
-                        fontWeight="900"
-                        fontFamily="sans-serif"
-                        className="pointer-events-none"
-                      >
-                        {p.part.item}
-                      </text>
+                    {p.w >= 30 && p.h >= 16 ? (
+                      <g className="pointer-events-none">
+                        <text
+                          x={p.x + p.w / 2}
+                          y={p.y + p.h / 2 - (p.h >= 45 && p.w >= 60 ? 6 : 0)}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#ffffff"
+                          fontSize={Math.max(9, Math.min(p.w / (Math.max(p.part.item.length, 3) * 0.65), p.h / 2.2, 26))}
+                          fontWeight="900"
+                          fontFamily="sans-serif"
+                          stroke="#000000"
+                          strokeWidth={1.5}
+                          paintOrder="stroke fill"
+                        >
+                          {p.part.item}
+                        </text>
+                        {p.h >= 45 && p.w >= 60 ? (
+                          <text
+                            x={p.x + p.w / 2}
+                            y={p.y + p.h / 2 + 8}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill="#cbd5e1"
+                            fontSize={Math.max(8, Math.min(p.w / 10, p.h / 4.5, 14))}
+                            fontWeight="700"
+                            fontFamily="sans-serif"
+                            stroke="#000000"
+                            strokeWidth={1}
+                            paintOrder="stroke fill"
+                          >
+                            {p.w}×{p.h}
+                          </text>
+                        ) : null}
+                      </g>
                     ) : null}
                   </g>
                 );
