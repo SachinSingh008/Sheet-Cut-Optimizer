@@ -28,7 +28,13 @@ export function partArea(p: Part): number {
   return isNaN(val) || !isFinite(val) ? 0 : val;
 }
 
-import { findMatchingPlateType, DEFAULT_PLATE_TYPES, type PlateTypeConfig } from "./nesting";
+import {
+  findMatchingPlateType,
+  DEFAULT_PLATE_TYPES,
+  type PlateTypeConfig,
+  resolveSheetDimensionsForPart,
+  type CustomStockSheetRule,
+} from "./nesting";
 
 export const MOCK_PARTS: Part[] = [];
 
@@ -46,15 +52,25 @@ export type ThicknessGroup = {
 
 export function groupByThickness(
   parts: Part[],
-  plateTypes: PlateTypeConfig[] = DEFAULT_PLATE_TYPES
+  plateTypes: PlateTypeConfig[] = DEFAULT_PLATE_TYPES,
+  customStockSheets?: CustomStockSheetRule[]
 ): ThicknessGroup[] {
+  const dummyConfig = {
+    sheetLength: 6300,
+    sheetWidth: 1500,
+    kerf: 3,
+    trim: 0,
+    rotation: true,
+    algorithm: "auto",
+    plateTypes,
+    customStockSheets: customStockSheets ?? [],
+  };
   const map = new Map<string, Part[]>();
 
   for (const p of parts) {
-    const pt = findMatchingPlateType(p, p.thickness, plateTypes);
-    const ptId = pt ? pt.id : "ms-thin";
+    const dim = resolveSheetDimensionsForPart(p, dummyConfig);
     const t = Number(p.thickness) || 0;
-    const key = `${ptId}|${t}`;
+    const key = `${dim.plateTypeId}|${dim.sheetLength}x${dim.sheetWidth}|${t}`;
 
     const existing = map.get(key);
     if (existing) {
@@ -67,11 +83,11 @@ export function groupByThickness(
   return [...map.entries()]
     .map(([key, items]) => {
       const first = items[0]!;
-      const pt = findMatchingPlateType(first, first.thickness, plateTypes);
-      const ptId = pt ? pt.id : "ms-thin";
-      const ptName = pt ? pt.name : "Mild Steel Plate (IS 2062 Thin)";
-      const sheetLength = pt ? pt.sheetLength : 6300;
-      const sheetWidth = pt ? pt.sheetWidth : 1500;
+      const dim = resolveSheetDimensionsForPart(first, dummyConfig);
+      const ptId = dim.plateTypeId;
+      const ptName = dim.plateTypeName;
+      const sheetLength = dim.sheetLength;
+      const sheetWidth = dim.sheetWidth;
       const thickness = Number(first.thickness) || 0;
 
       return {

@@ -24,6 +24,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { store, useAppState } from "@/lib/store";
 import { groupByThickness, MATERIAL_RATE, partWeight } from "@/lib/mock-data";
 import { generateCuttingSequence } from "@/lib/cutting-sequence";
+import { computeSheetUtilizedDimensions } from "@/lib/nesting";
+import { ThicknessLengthSummaryTable } from "@/components/app/thickness-length-summary-table";
 
 export const Route = createFileRoute("/_app/reports")({
   head: () => ({
@@ -144,6 +146,17 @@ function ReportsPage() {
         }
       />
 
+      {result && result.sheets.length > 0 && (
+        <div className="mb-6">
+          <ThicknessLengthSummaryTable
+            sheets={result.sheets}
+            kerf={result.config.kerf}
+            title="Executive Plate Cut Length & Procurement Summary"
+            subtitle="Individual required sheet cut lengths and combined linear totals grouped by thickness"
+          />
+        </div>
+      )}
+
       <Tabs defaultValue="summary">
         <TabsList className="mb-6 flex-wrap">
           <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -227,15 +240,32 @@ function ReportsPage() {
         <TabsContent value="scrap">
           {result ? (
             <ReportTable
-              headers={["Sheet", "Material", "Thickness", "Parts", "Utilization", "Scrap"]}
-              rows={result.sheets.map((s) => [
-                s.id,
-                s.material,
-                `PL ${s.thickness} THK`,
-                `${s.placed.length}`,
-                `${s.utilization.toFixed(1)}%`,
-                `${(100 - s.utilization).toFixed(1)}%`,
-              ])}
+              headers={[
+                "Sheet",
+                "Material",
+                "Thickness",
+                "Parts",
+                "Stock Plate Size",
+                "Required Cut Size",
+                "Remaining Remnant",
+                "Utilization",
+                "Scrap",
+              ]}
+              rows={result.sheets.map((s) => {
+                const kerf = result.config?.kerf ?? 5;
+                const u = computeSheetUtilizedDimensions(s, kerf);
+                return [
+                  s.id,
+                  s.material,
+                  `PL ${s.thickness} THK`,
+                  `${s.placed.length}`,
+                  `${s.sheetLength.toLocaleString()} × ${s.sheetWidth.toLocaleString()} mm`,
+                  u.requiredCutSizeStr,
+                  u.primaryRemnant.formatted,
+                  `${s.utilization.toFixed(1)}%`,
+                  `${(100 - s.utilization).toFixed(1)}%`,
+                ];
+              })}
             />
           ) : (
             <EmptyState title="No scrap data" description="Run the optimizer first." />

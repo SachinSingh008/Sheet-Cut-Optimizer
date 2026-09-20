@@ -39,6 +39,8 @@ import { store, useAppState } from "@/lib/store";
 import { parseExcelFile, type RejectedPart } from "@/lib/excel-parser";
 import { processDocumentOcr, type OcrProgress } from "@/lib/ocr-parser";
 import { EditableBomTable } from "@/components/app/editable-bom-table";
+import { ExcelWorkbook } from "@/components/app/excel-workbook";
+import { OptimizationTimerModal } from "@/components/app/optimization-timer-modal";
 import { partWeight, type Part } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
@@ -82,6 +84,7 @@ function UploadPage() {
   const [showEditTable, setShowEditTable] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [showTimerModal, setShowTimerModal] = useState(false);
 
   // Restore Modal State
   const [restoringRejected, setRestoringRejected] = useState<RejectedPart | null>(null);
@@ -181,11 +184,7 @@ function UploadPage() {
 
   const confirmAndNavigate = () => {
     setShowVerifyModal(false);
-    store.runOptimization();
-    toast.success("BOM Verified!", {
-      description: "Generating optimal plate cut layouts...",
-    });
-    navigate({ to: "/layouts" });
+    setShowTimerModal(true);
   };
 
   const handleSaveRestoredPart = () => {
@@ -215,11 +214,36 @@ function UploadPage() {
 
   return (
     <PageTransition>
+      <OptimizationTimerModal
+        isOpen={showTimerModal}
+        onClose={() => setShowTimerModal(false)}
+        targetRoute="/layouts"
+      />
+
       <PageHeader
         eyebrow="STEP 1"
-        title="Upload Fabrication BOM or OCR Blueprint"
-        description="Select or drop your Excel (.xlsx, .csv) or Image/PDF drawing blueprints for OCR extraction. Review and edit plate dimensions in the table before optimizing."
+        title="Fabrication BOM Entry & Drawing Upload"
+        description="Copy & paste directly into the interactive Excel workbook, drag to auto-fill values, or drop your Excel (.xlsx, .csv) / PDF & Image blueprint below."
       />
+
+      {/* Interactive Excel Workbook with Direct Paste & Drag-to-Fill */}
+      <ExcelWorkbook
+        onApplied={() => {
+          setShowVerifyModal(true);
+        }}
+      />
+
+      {/* Or Upload Drop Zone Divider */}
+      <div className="relative my-8 text-center">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t-2 border-dashed border-border" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-background px-4 font-bold tracking-wider text-muted-foreground flex items-center gap-2">
+            <span>OR UPLOAD BILL OF MATERIALS FILE / OCR BLUEPRINT</span>
+          </span>
+        </div>
+      </div>
 
       {/* Upload Drop Zone */}
       <div
@@ -656,13 +680,14 @@ function UploadPage() {
                                     size="sm"
                                     className="h-7 text-[11px] bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-1"
                                     onClick={() => {
-                                      store.splitOversizedPart(r.id, 6300);
+                                      const segLen = config.sheetLength || 6000;
+                                      store.splitOversizedPart(r.id, segLen);
                                       toast.success("Auto-Split Applied!", {
-                                        description: `Split ${r.item} into 6,300mm standard stock segments and moved to nesting.`,
+                                        description: `Split ${r.item} into ${segLen}mm standard stock segments and moved to nesting.`,
                                       });
                                     }}
                                   >
-                                    <Scissors className="size-3" /> Auto-Split (6.3m)
+                                    <Scissors className="size-3" /> Auto-Split ({((config.sheetLength || 6000) / 1000).toFixed(1)}m)
                                   </Button>
                                 ) : null}
 

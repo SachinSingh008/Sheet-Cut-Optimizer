@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { store, useAppState } from "@/lib/store";
 import { optimize } from "@/lib/nesting";
 import { AdaptiveEngineCard } from "@/components/app/adaptive-engine-card";
+import { OptimizationTimerModal } from "@/components/app/optimization-timer-modal";
 
 export const Route = createFileRoute("/_app/layouts")({
   head: () => ({
@@ -32,6 +33,7 @@ function LayoutsPage() {
   const { result, parts, config, file, isOptimizing, progress, progressMessage } = useAppState();
   const [index, setIndex] = useState(0);
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const [showTimerModal, setShowTimerModal] = useState(false);
 
   if (isOptimizing) {
     return (
@@ -103,6 +105,11 @@ function LayoutsPage() {
   return (
     <PageTransition>
       {showPdfModal && <PdfLayoutReport result={result} onClose={() => setShowPdfModal(false)} />}
+      <OptimizationTimerModal
+        isOpen={showTimerModal}
+        onClose={() => setShowTimerModal(false)}
+        targetRoute="/layouts"
+      />
 
       <PageHeader
         eyebrow="STEP 4"
@@ -110,6 +117,14 @@ function LayoutsPage() {
         description={`${file?.name ? `${file.name} · ` : ""}${result.sheets.length} nested plates · ${result.utilization.toFixed(1)}% average utilization · ${result.scrap.toFixed(1)}% scrap.`}
         actions={
           <div className="flex items-center gap-3">
+            <Button
+              onClick={() => setShowTimerModal(true)}
+              variant="outline"
+              size="lg"
+              className="border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 font-bold"
+            >
+              <Sparkles className="mr-1.5 size-4 text-amber-500" /> Re-run 15s Optimization
+            </Button>
             <Button
               size="lg"
               onClick={() => setShowPdfModal(true)}
@@ -172,7 +187,7 @@ function LayoutsPage() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between px-1 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 font-bold text-[11px]">
                           <span>🟡 Chequered Plates ({chqItems.length})</span>
-                          <span>6000×1250</span>
+                          <span>{chqItems[0]?.s.sheetLength}×{chqItems[0]?.s.sheetWidth}</span>
                         </div>
                         {chqItems.map(({ s, i }) => (
                           <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />
@@ -183,8 +198,8 @@ function LayoutsPage() {
                     {normalItems.length > 0 && (
                       <div className="space-y-2 pt-2">
                         <div className="flex items-center justify-between px-1 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-800 dark:text-blue-300 font-bold text-[11px]">
-                          <span>🔵 Normal MS Plates ({normalItems.length})</span>
-                          <span>6300×1500</span>
+                          <span>🔵 Normal / MS Plates ({normalItems.length})</span>
+                          <span>{normalItems[0]?.s.sheetLength}×{normalItems[0]?.s.sheetWidth}</span>
                         </div>
                         {normalItems.map(({ s, i }) => (
                           <SheetThumbnail key={s.id} sheet={s} active={i === index} onClick={() => setIndex(i)} />

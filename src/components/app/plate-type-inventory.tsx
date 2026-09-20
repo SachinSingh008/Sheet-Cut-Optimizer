@@ -39,8 +39,8 @@ export function PlateTypeInventorySection({
   const [formAbbr, setFormAbbr] = useState("");
   const [formMinThk, setFormMinThk] = useState(0);
   const [formMaxThk, setFormMaxThk] = useState(100);
-  const [formLength, setFormLength] = useState(6300);
-  const [formWidth, setFormWidth] = useState(1500);
+  const [formLength, setFormLength] = useState(6000);
+  const [formWidth, setFormWidth] = useState(2000);
   const [formDesc, setFormDesc] = useState("");
 
   const openAddModal = () => {
@@ -48,8 +48,8 @@ export function PlateTypeInventorySection({
     setFormAbbr("");
     setFormMinThk(0);
     setFormMaxThk(100);
-    setFormLength(6300);
-    setFormWidth(1500);
+    setFormLength(6000);
+    setFormWidth(2000);
     setFormDesc("");
     setIsAdding(true);
   };

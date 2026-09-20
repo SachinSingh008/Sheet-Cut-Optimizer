@@ -22,6 +22,260 @@ export type NestedSheet = {
   utilization: number;
 };
 
+export interface SheetUtilizedDimensions {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  usedLength: number;
+  usedWidth: number;
+  /** Formatted as e.g. "100 × 205 mm" (showing how much part is used with kerf) */
+  requiredCutSizeStr: string;
+  /** Formatted as "L: 205mm × W: 100mm" */
+  requiredCutDetailStr: string;
+  /** Primary remnant offcut rectangle */
+  primaryRemnant: {
+    w: number;
+    h: number;
+    formatted: string;
+  };
+  /** Secondary remnant offcut rectangle */
+  secondaryRemnant?: {
+    w: number;
+    h: number;
+    formatted: string;
+  } | undefined;
+}
+
+/**
+ * Calculates the exact required stock plate size used by nested parts
+ * taking blade kerf into account (e.g. 2 plates of 100x100 with 5mm kerf -> 100 x 205 mm)
+ * and calculates the remaining usable remnant offcuts.
+ */
+export function computeSheetUtilizedDimensions(
+  sheet: NestedSheet,
+  kerf: number = 5,
+): SheetUtilizedDimensions {
+  if (!sheet.placed || sheet.placed.length === 0) {
+    const sMin = Math.min(sheet.sheetLength, sheet.sheetWidth);
+    const sMax = Math.max(sheet.sheetLength, sheet.sheetWidth);
+    return {
+      minX: 0,
+      minY: 0,
+      maxX: 0,
+      maxY: 0,
+      usedLength: 0,
+      usedWidth: 0,
+      requiredCutSizeStr: "0 × 0 mm",
+      requiredCutDetailStr: "0 × 0 mm",
+      primaryRemnant: {
+        w: sheet.sheetLength,
+        h: sheet.sheetWidth,
+        formatted: `${sMin} × ${sMax} mm`,
+      },
+    };
+  }
+
+  const maxX = Math.max(...sheet.placed.map((p) => p.x + p.w));
+  const maxY = Math.max(...sheet.placed.map((p) => p.y + p.h));
+  const minX = Math.min(...sheet.placed.map((p) => p.x));
+  const minY = Math.min(...sheet.placed.map((p) => p.y));
+
+  const usedLen = Math.round(maxX);
+  const usedWid = Math.round(maxY);
+
+  // User rule: e.g. 2 plates of 100x100 with 5mm kerf gives 100 x 205
+  const d1 = Math.min(usedWid, usedLen);
+  const d2 = Math.max(usedWid, usedLen);
+  const requiredCutSizeStr = `${d1} × ${d2} mm`;
+  const requiredCutDetailStr = `${usedLen} × ${usedWid} mm`;
+
+  // Remnant sizes:
+  // Remnant 1 (Length-wise): from maxX to sheetLength, height = sheetWidth
+  const rem1W = Math.max(0, sheet.sheetLength - usedLen);
+  const rem1H = sheet.sheetWidth;
+
+  // Remnant 2 (Width-wise over cut zone): width = usedLen, height = sheetWidth - usedWid
+  const rem2W = usedLen;
+  const rem2H = Math.max(0, sheet.sheetWidth - usedWid);
+
+  const r1Min = Math.min(rem1W, rem1H);
+  const r1Max = Math.max(rem1W, rem1H);
+
+  return {
+    minX,
+    minY,
+    maxX: usedLen,
+    maxY: usedWid,
+    usedLength: usedLen,
+    usedWidth: usedWid,
+    requiredCutSizeStr,
+    requiredCutDetailStr,
+    primaryRemnant: {
+      w: rem1W,
+      h: rem1H,
+      formatted: `${r1Min} × ${r1Max} mm`,
+    },
+    secondaryRemnant:
+      rem2W > 25 && rem2H > 25
+        ? {
+            w: rem2W,
+            h: rem2H,
+            formatted: `${Math.min(rem2W, rem2H)} × ${Math.max(rem2W, rem2H)} mm`,
+          }
+        : undefined,
+  };
+}
+
+export interface ThicknessLengthItem {
+  thickness: number;
+  material: string;
+  isChq: boolean;
+  qty: number;
+  lengthNeeded: number; // e.g. 6300 or 200
+  sheetWidth: number;   // e.g. 1500
+  sheetIds: string[];   // e.g. ["S01"] or ["S02"]
+  totalLengthMm: number; // qty * lengthNeeded
+  weightKg: number;
+}
+
+export interface ThicknessGroupSummary {
+  thickness: number;
+  material: string;
+  isChq: boolean;
+  items: ThicknessLengthItem[];
+  totalSheets: number;
+  totalLengthNeededMm: number; // combined length for that thickness (e.g. 6300 + 200 = 6500)
+  totalWeightKg: number;
+}
+
+export interface ExecutiveProcurementSummary {
+  groups: ThicknessGroupSummary[];
+  grandTotalSheets: number;
+  grandTotalLengthMm: number;
+  grandTotalWeightKg: number;
+}
+
+/**
+ * Calculates executive summary of total combined lengths needed per thickness plate.
+ * For example: if Sheet 1 of thk 8 needs 6300mm and Sheet 2 of thk 8 needs 200mm,
+ * this outputs:
+ *   - thk 8, qty 1, len 6300 mm
+ *   - thk 8, qty 1, len 200 mm
+ *   - Total combined length for thk 8: 6,500 mm (2 sheets)
+ */
+export function computeThicknessLengthSummary(
+  sheets: NestedSheet[],
+  kerf: number = 5,
+): ExecutiveProcurementSummary {
+  if (!sheets || sheets.length === 0) {
+    return {
+      groups: [],
+      grandTotalSheets: 0,
+      grandTotalLengthMm: 0,
+      grandTotalWeightKg: 0,
+    };
+  }
+
+  // Group sheets by thickness and material (distinguishing CHQ vs Normal)
+  const groupMap = new Map<string, { thickness: number; material: string; isChq: boolean; sheets: NestedSheet[] }>();
+
+  for (const s of sheets) {
+    const isChq = /CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|IS 3502|\bCP\b/i.test(
+      `${s.material} ${s.id}`
+    );
+    const key = `${s.thickness}|${isChq ? "CHQ" : "MS"}|${s.material}`;
+    const existing = groupMap.get(key);
+    if (existing) {
+      existing.sheets.push(s);
+    } else {
+      groupMap.set(key, {
+        thickness: s.thickness,
+        material: s.material,
+        isChq,
+        sheets: [s],
+      });
+    }
+  }
+
+  const groups: ThicknessGroupSummary[] = [];
+  let grandTotalSheets = 0;
+  let grandTotalLengthMm = 0;
+  let grandTotalWeightKg = 0;
+
+  for (const [, grp] of groupMap) {
+    // Within each thickness group, calculate length needed for each sheet and aggregate by lengthNeeded
+    const lengthMap = new Map<number, { qty: number; sheetWidth: number; sheetIds: string[]; totalWeight: number }>();
+
+    for (const s of grp.sheets) {
+      const u = computeSheetUtilizedDimensions(s, kerf);
+      // If parts are placed, usedLength is the cut length needed; if near full sheet, use full stock length
+      const lengthNeeded = s.placed.length === 0 ? 0 : (u.usedLength >= s.sheetLength - 5 ? s.sheetLength : Math.max(u.usedLength, 1));
+      const width = s.sheetWidth;
+
+      // Density: 7.85e-6 kg/mm^3
+      const weight = lengthNeeded * width * s.thickness * 7.85e-6;
+
+      const existing = lengthMap.get(lengthNeeded);
+      if (existing) {
+        existing.qty += 1;
+        existing.sheetIds.push(s.id);
+        existing.totalWeight += weight;
+      } else {
+        lengthMap.set(lengthNeeded, {
+          qty: 1,
+          sheetWidth: width,
+          sheetIds: [s.id],
+          totalWeight: weight,
+        });
+      }
+    }
+
+    // Sort items by lengthNeeded descending (e.g. 6300mm full sheets first, then 200mm partial sheets)
+    const sortedLengths = [...lengthMap.entries()].sort((a, b) => b[0] - a[0]);
+
+    const items: ThicknessLengthItem[] = sortedLengths.map(([lenNeeded, data]) => ({
+      thickness: grp.thickness,
+      material: grp.material,
+      isChq: grp.isChq,
+      qty: data.qty,
+      lengthNeeded: lenNeeded,
+      sheetWidth: data.sheetWidth,
+      sheetIds: data.sheetIds,
+      totalLengthMm: lenNeeded * data.qty,
+      weightKg: Math.round(data.totalWeight * 10) / 10,
+    }));
+
+    const totalSheets = items.reduce((sum, item) => sum + item.qty, 0);
+    const totalLengthNeededMm = items.reduce((sum, item) => sum + item.totalLengthMm, 0);
+    const totalWeightKg = Math.round(items.reduce((sum, item) => sum + item.weightKg, 0) * 10) / 10;
+
+    groups.push({
+      thickness: grp.thickness,
+      material: grp.material,
+      isChq: grp.isChq,
+      items,
+      totalSheets,
+      totalLengthNeededMm,
+      totalWeightKg,
+    });
+
+    grandTotalSheets += totalSheets;
+    grandTotalLengthMm += totalLengthNeededMm;
+    grandTotalWeightKg += totalWeightKg;
+  }
+
+  // Sort groups by thickness ascending
+  groups.sort((a, b) => a.thickness - b.thickness || a.material.localeCompare(b.material));
+
+  return {
+    groups,
+    grandTotalSheets,
+    grandTotalLengthMm,
+    grandTotalWeightKg: Math.round(grandTotalWeightKg * 10) / 10,
+  };
+}
+
 export type PlateTypeConfig = {
   id: string;
   name: string;
@@ -43,7 +297,7 @@ export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
     maxThickness: 12,
     sheetLength: 6000,
     sheetWidth: 1250,
-    description: "Anti-skid floor & stair tread plates (SAIL std: 6000 × 1250 mm)",
+    description: "Anti-skid floor & stair tread plates (6000 × 1250 mm)",
   },
   {
     id: "ms-thin",
@@ -51,9 +305,9 @@ export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
     abbreviations: ["PL", "MS", "IS2062", "IS:2062", "E250", "E250A", "E250BR", "E250C"],
     minThickness: 2,
     maxThickness: 10,
-    sheetLength: 6300,
-    sheetWidth: 1500,
-    description: "Standard thin HR mill plates (SAIL std: 6300 × 1500 mm)",
+    sheetLength: 6000,
+    sheetWidth: 2000,
+    description: "Standard workshop plates (2000 × 6000 mm)",
   },
   {
     id: "ms-heavy",
@@ -61,9 +315,9 @@ export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
     abbreviations: ["PL", "MS", "IS2062", "IS:2062", "E250", "E250A", "E250BR", "E250C"],
     minThickness: 11,
     maxThickness: 50,
-    sheetLength: 6300,
-    sheetWidth: 1500,
-    description: "Heavy structural bridge plates (SAIL/Jindal std: 6300 × 1500 mm)",
+    sheetLength: 6000,
+    sheetWidth: 2000,
+    description: "Heavy structural bridge plates (2000 × 6000 mm)",
   },
   {
     id: "high-tensile",
@@ -71,9 +325,9 @@ export const DEFAULT_PLATE_TYPES: PlateTypeConfig[] = [
     abbreviations: ["SAILMA", "E350BR", "E350", "HS"],
     minThickness: 8,
     maxThickness: 100,
-    sheetLength: 6300,
-    sheetWidth: 1500,
-    description: "High strength bridge girder plates (SAIL std: 6300 × 1500 mm)",
+    sheetLength: 6000,
+    sheetWidth: 2000,
+    description: "High strength bridge girder plates (2000 × 6000 mm)",
   },
 ];
 
@@ -194,6 +448,15 @@ export type SAResult = {
   history: SAFitnessHistoryEntry[];
 };
 
+export type CustomStockSheetRule = {
+  id: string;
+  material: string; // e.g. "CHQ", "MS", "IS2062", or "*"
+  thickness?: number | null; // e.g. 4 (if null or 0, applies to all thicknesses of that material)
+  sheetWidth: number; // e.g. 1500
+  sheetLength: number; // e.g. 6000
+  description?: string;
+};
+
 export type OptimizationConfig = {
   sheetLength: number;
   sheetWidth: number;
@@ -205,6 +468,7 @@ export type OptimizationConfig = {
   scoringWeights?: ScoringWeights;
   groupByMaterial?: boolean;
   plateTypes?: PlateTypeConfig[];
+  customStockSheets?: CustomStockSheetRule[] | undefined;
   saConfig?: SimulatedAnnealingConfig;
   generations?: number;
   populationSize?: number;
@@ -323,13 +587,126 @@ export function findMatchingPlateType(
 }
 
 /**
+ * Resolves stock sheet dimensions (Length x Width) for a part based on user-specified stock sizes.
+ * If user configured available stock sheet sizes, those user sizes are strictly used for the layout.
+ */
+export function resolveSheetDimensionsForPart(
+  part: Part,
+  config: OptimizationConfig
+): {
+  sheetLength: number;
+  sheetWidth: number;
+  plateTypeId: string;
+  plateTypeName: string;
+  isCustom: boolean;
+} {
+  const customRules = config.customStockSheets ?? [];
+  const partMatUpper = (part.material || "").toUpperCase();
+  const partDescUpper = (part.description || "").toUpperCase();
+  const partItemUpper = (part.item || "").toUpperCase();
+  const partFullText = `${partMatUpper} ${partDescUpper} ${partItemUpper}`;
+  const partClean = partFullText.replace(/[^A-Z0-9]/g, "");
+  const partThk = Number(part.thickness) || 0;
+  const isChqPart = /CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|IS 3502|\bCP\b/.test(partFullText);
+
+  // Helper to match user's custom rule material to part
+  const matchMaterial = (ruleMat: string): boolean => {
+    const rm = (ruleMat || "").trim().toUpperCase();
+    if (!rm || rm === "*" || rm === "ALL") return true;
+
+    const isChqRule = /CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|\bCP\b/.test(rm);
+    if (isChqRule) return isChqPart;
+    if (isChqPart) return false;
+
+    const rmClean = rm.replace(/[^A-Z0-9]/g, "");
+    if (rmClean && partClean.includes(rmClean)) return true;
+
+    // Common abbreviations in steel fabrication: IS2062, MS, E250, Mild Steel, PL
+    if (rm === "MS" || rm === "MILD STEEL") {
+      return (
+        partClean.includes("MS") ||
+        partClean.includes("IS2062") ||
+        partClean.includes("E250") ||
+        partClean.includes("PL") ||
+        !isChqPart
+      );
+    }
+    if (rmClean.includes("2062") && (partClean.includes("2062") || partClean.includes("E250") || partClean.includes("MS"))) {
+      return true;
+    }
+    return false;
+  };
+
+  // 1. If user defined Available Stock Sheets in the panel:
+  if (customRules.length > 0) {
+    // 1a. Priority 1: Match on material AND exact thickness
+    for (const rule of customRules) {
+      if (rule.thickness != null && Number(rule.thickness) > 0) {
+        if (Math.abs(Number(rule.thickness) - partThk) < 0.05 && matchMaterial(rule.material)) {
+          const w = Number(rule.sheetWidth) || 2000;
+          const l = Number(rule.sheetLength) || 6000;
+          return {
+            sheetLength: l,
+            sheetWidth: w,
+            plateTypeId: isChqPart ? "chq-custom" : "stock-custom",
+            plateTypeName: `Stock ${rule.material || ""} (${w}×${l} mm)`,
+            isCustom: true,
+          };
+        }
+      }
+    }
+
+    // 1b. Priority 2: Match on material for All thicknesses (thickness is null or 0)
+    for (const rule of customRules) {
+      if (!rule.thickness || Number(rule.thickness) <= 0) {
+        if (matchMaterial(rule.material)) {
+          const w = Number(rule.sheetWidth) || 2000;
+          const l = Number(rule.sheetLength) || 6000;
+          return {
+            sheetLength: l,
+            sheetWidth: w,
+            plateTypeId: isChqPart ? "chq-custom" : "stock-custom",
+            plateTypeName: `Stock ${rule.material || ""} (${w}×${l} mm)`,
+            isCustom: true,
+          };
+        }
+      }
+    }
+
+    // 1c. Priority 3: User defined stock sizes in the table, so optimize strictly as per user's stock size!
+    // Never fall back to 6300x1500 default when user provided stock sizes
+    const fallbackRule = customRules[0]!;
+    const w = Number(fallbackRule.sheetWidth) || 2000;
+    const l = Number(fallbackRule.sheetLength) || 6000;
+    return {
+      sheetLength: l,
+      sheetWidth: w,
+      plateTypeId: "stock-user",
+      plateTypeName: `Stock Plate (${w}×${l} mm)`,
+      isCustom: true,
+    };
+  }
+
+  // 2. If no custom stock sheets exist at all, use config.sheetWidth & config.sheetLength
+  const fallbackL = config.sheetLength || 6000;
+  const fallbackW = config.sheetWidth || 2000;
+  return {
+    sheetLength: fallbackL,
+    sheetWidth: fallbackW,
+    plateTypeId: "standard-stock",
+    plateTypeName: `Stock Plate (${fallbackW}×${fallbackL} mm)`,
+    isCustom: false,
+  };
+}
+
+/**
  * Task 6 Implementation: Adaptive Optimization Engine - BOM Characteristic Analyzer
  * Automatically analyzes BOM shape, aspect ratio, relative part area, and size variance.
  */
 export function analyzeBOMCharacteristics(
   parts: Part[],
-  sheetLength: number = 6300,
-  sheetWidth: number = 1500
+  sheetLength: number = 6000,
+  sheetWidth: number = 2000
 ): BOMAnalysis {
   const validParts = parts.filter((p) => !p.invalid);
   if (validParts.length === 0) {
@@ -1144,6 +1521,16 @@ export function packSingleSheetMaxRectsBFD(
               score = shortSide * 100 - stripBonus - contactBonus;
             }
 
+            // Width-First Placement Directive:
+            // 1. Heavy penalty on rect.x (advancing in length) keeps parts in the current leftmost width column
+            // 2. Penalty on orient.w minimizes how far the part extends into the length
+            // 3. Gentle penalty on rect.y packs parts sequentially along the 1500mm width
+            // 4. Bonus for utilizing the 1500mm width (higher orient.h up to curSheetWidth)
+            const xAdvancePenalty = rect.x * 30000 + orient.w * 8000;
+            const ySequencePenalty = rect.y * 50;
+            const widthFillBonus = (orient.h / curSheetWidth) * 3000;
+            score += xAdvancePenalty + ySequencePenalty - widthFillBonus;
+
             if (score < bestScore) {
               bestScore = score;
               bestItemIdx = itemIdx;
@@ -1222,7 +1609,7 @@ export function packSingleSheetMaxRectsBFD(
               }
             }
 
-            const score = leftoverArea - contactLength * 10;
+            const score = leftoverArea - contactLength * 10 + rect.x * 20000 + rect.y * 50;
             if (score < bestFitScore) {
               bestFitScore = score;
               bestFitRectIdx = r;
@@ -2111,7 +2498,8 @@ export function packSkylineSheet(
               if (startX + orient.w >= curSheetLength - trim) contactLen += orient.h;
               if (maxY + orient.h >= curSheetWidth - trim) contactLen += orient.w;
 
-              const score = maxY * 10000 + startX - contactLen * 50;
+              // Width-first skyline: place at lowest startX and stack upward along Y (1500mm width)
+              const score = startX * 30000 + maxY * 50 - contactLen * 50;
 
               if (score < bestScore) {
                 bestScore = score;
@@ -2478,10 +2866,20 @@ export function solveBucketPopulation(
     const candScore = evaluateLayoutScore(candidateSheets, weights, config).score;
     const bestScoreVal = evaluateLayoutScore(bestSheets, weights, config).score;
 
+    const candMaxX = candidateSheets.reduce(
+      (m, s) => Math.max(m, ...s.placed.map((p) => p.x + p.w)),
+      0
+    );
+    const bestMaxX = bestSheets.reduce(
+      (m, s) => Math.max(m, ...s.placed.map((p) => p.x + p.w)),
+      0
+    );
+
     if (
       candidateSheets.length < bestSheets.length ||
-      (candidateSheets.length === bestSheets.length && candUtil > bestUtil + 0.05) ||
-      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.05 && candScore > bestScoreVal)
+      (candidateSheets.length === bestSheets.length && candUtil > bestUtil + 0.3) ||
+      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.3 && candMaxX < bestMaxX - 5) ||
+      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.3 && Math.abs(candMaxX - bestMaxX) <= 5 && candScore > bestScoreVal)
     ) {
       bestSheets = candidateSheets;
     }
@@ -2640,11 +3038,11 @@ export function optimize(
 
   for (let i = 0; i < valid.length; i++) {
     const p = valid[i]!;
-    const matchedPlate = findMatchingPlateType(p, p.thickness, activePlateTypes);
-    const plateTypeId = matchedPlate ? matchedPlate.id : "ms-thin";
+    const dimInfo = resolveSheetDimensionsForPart(p, config);
+    const plateTypeId = dimInfo.plateTypeId;
     const key = groupByMaterial
-      ? `${plateTypeId}|${p.material}|${p.thickness}`
-      : `${plateTypeId}|${p.thickness}`;
+      ? `${plateTypeId}|${dimInfo.sheetLength}x${dimInfo.sheetWidth}|${p.material}|${p.thickness}`
+      : `${plateTypeId}|${dimInfo.sheetLength}x${dimInfo.sheetWidth}|${p.thickness}`;
     const list = buckets.get(key);
     if (list) {
       list.push(p);
@@ -2666,19 +3064,21 @@ export function optimize(
     const endProgress = 10 + (bucketIndex / totalBuckets) * 75;
 
     const firstPart = group[0]!;
-    const matchedPlate = findMatchingPlateType(firstPart, firstPart.thickness, activePlateTypes);
+    const dimInfo = resolveSheetDimensionsForPart(firstPart, config);
     const thickness = firstPart.thickness;
 
-    const material = matchedPlate
-      ? matchedPlate.id === "chq"
-        ? `IS:3502 Chequered Plate (${thickness}mm)`
-        : `${matchedPlate.name}`
+    const isChq = /CHQ|CHEQ|CHEQUERED|CHECKERED|PATTERN|IS3502|IS 3502|\bCP\b/i.test(
+      `${firstPart.material} ${firstPart.description} ${firstPart.item}`
+    );
+
+    const material = isChq
+      ? `IS:3502 Chequered Plate (${thickness}mm)`
       : firstPart.material || `Mild Steel Plate (${thickness}mm)`;
 
     onProgress?.(startProgress, `Evolving population for bucket ${bucketIndex}/${totalBuckets}: ${material}...`);
 
-    const curSheetLength = matchedPlate ? matchedPlate.sheetLength : config.sheetLength;
-    const curSheetWidth = matchedPlate ? matchedPlate.sheetWidth : config.sheetWidth;
+    const curSheetLength = dimInfo.sheetLength;
+    const curSheetWidth = dimInfo.sheetWidth;
 
     const usableL = curSheetLength - config.trim * 2;
     const usableW = curSheetWidth - config.trim * 2;

@@ -7,6 +7,7 @@ import {
   type OptimizationConfig,
   type OptimizationResult,
   type PlateTypeConfig,
+  type CustomStockSheetRule,
 } from "./nesting";
 
 export type UploadedFile = {
@@ -30,14 +31,24 @@ export type AppState = {
 };
 
 const defaultConfig: OptimizationConfig = {
-  sheetLength: 6300,
-  sheetWidth: 1500,
+  sheetLength: 6000,
+  sheetWidth: 2000,
   kerf: 3,
   trim: 0,
   rotation: true,
   algorithm: "auto",
   groupByMaterial: false,
-  plateTypes: DEFAULT_PLATE_TYPES,
+  plateTypes: [],
+  customStockSheets: [
+    {
+      id: "stock-user-1",
+      material: "IS2062",
+      thickness: null,
+      sheetWidth: 2000,
+      sheetLength: 6000,
+      description: "Available Workshop Stock Plate (2000×6000 mm)",
+    },
+  ],
 };
 
 const initial: AppState = {
@@ -269,7 +280,7 @@ export const store = {
   },
 
   /** Auto-split an oversized long part into standard sheet segment lengths */
-  splitOversizedPart(rejectedId: string, maxSegmentLength: number = 6300) {
+  splitOversizedPart(rejectedId: string, maxSegmentLength: number = state.config.sheetLength || 6000) {
     const itemToSplit = state.rejectedParts.find((r) => r.id === rejectedId);
     if (!itemToSplit) return;
 
@@ -358,6 +369,44 @@ export const store = {
     const newConfig = { ...state.config, plateTypes: updated };
     state = { ...state, config: newConfig };
     runBackgroundOptimization(state.parts, newConfig);
+  },
+
+  setDefaultSheetDimensions(sheetWidth: number, sheetLength: number) {
+    const newConfig = { ...state.config, sheetWidth, sheetLength };
+    state = { ...state, config: newConfig };
+    runBackgroundOptimization(state.parts, newConfig);
+  },
+
+  setCustomStockSheets(customStockSheets: CustomStockSheetRule[]) {
+    const primary = customStockSheets[0];
+    const newConfig: OptimizationConfig = {
+      ...state.config,
+      customStockSheets,
+      ...(primary && primary.sheetWidth && primary.sheetLength
+        ? {
+            sheetWidth: Number(primary.sheetWidth) || state.config.sheetWidth,
+            sheetLength: Number(primary.sheetLength) || state.config.sheetLength,
+          }
+        : {}),
+    };
+    state = { ...state, config: newConfig };
+    runBackgroundOptimization(state.parts, newConfig);
+  },
+
+  addCustomStockSheet(rule: CustomStockSheetRule) {
+    const current = state.config.customStockSheets ?? [];
+    this.setCustomStockSheets([...current, rule]);
+  },
+
+  updateCustomStockSheet(id: string, patch: Partial<CustomStockSheetRule>) {
+    const current = state.config.customStockSheets ?? [];
+    const updated = current.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    this.setCustomStockSheets(updated);
+  },
+
+  removeCustomStockSheet(id: string) {
+    const current = state.config.customStockSheets ?? [];
+    this.setCustomStockSheets(current.filter((r) => r.id !== id));
   },
 
   setFile(file: UploadedFile) {

@@ -13,10 +13,104 @@ export type RejectedPart = {
   rawQty?: string;
 };
 
+export interface ExtractedDimensions {
+  length?: number | undefined;
+  width?: number | undefined;
+  thickness?: number | undefined;
+  valuesCount: number;
+}
+
 /**
- * Parses an Excel (.xlsx, .xls) or CSV file into Part[] and RejectedPart[]
- * Support all industrial structural steel profile formats (PL*, PLT*, ISA*, ISMC*, NPB*, etc.)
- * and detects header rows automatically even when title banners exist.
+ * Intelligent dimension extractor following standard fabrication plate rules:
+ * - If 3 values: len > width > thickness (largest = length, middle = width, smallest = thickness)
+ * - If 2 values: width > thk (larger = width, smaller = thickness)
+ */
+export function extractDimensionsFromText(text: string): ExtractedDimensions | null {
+  if (!text) return null;
+  const str = String(text).trim();
+  if (!str) return null;
+
+  // 1. Check for 3-part dimensions (e.g. "PL10*110*1200", "PL 10 x 110 x 1200", "10*110*1200", "1200*110*10", "PL10*110-1200")
+  const threePartRegex =
+    /(?:(?:PL|PLT|PLATE|FLAT|FL|FB|MS|CHQ|STRIP)[\s\-\.]*)?(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)?\s*[\*xX×\-\/,\s]\s*(?:(?:x|X|×|\*)\s*)?(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)?\s*[\*xX×\-\/,\s]\s*(?:(?:x|X|×|\*)\s*)?(\d+(?:\.\d+)?)(?:\s*(?:LG\.?|LONG|MM))?/i;
+
+  const m3 = str.match(threePartRegex);
+  if (m3 && m3[1] && m3[2] && m3[3]) {
+    const n1 = parseFloat(m3[1]);
+    const n2 = parseFloat(m3[2]);
+    const n3 = parseFloat(m3[3]);
+    if (!isNaN(n1) && !isNaN(n2) && !isNaN(n3) && n1 > 0 && n2 > 0 && n3 > 0) {
+      // User rule: if 3 values contain then len > width > thickness
+      const sorted = [n1, n2, n3].sort((a, b) => b - a);
+      return {
+        length: sorted[0],
+        width: sorted[1],
+        thickness: sorted[2],
+        valuesCount: 3,
+      };
+    }
+  }
+
+  // 2. Check for 2-part dimensions (e.g. "PL10*110", "PL10*150", "PL10*257", "PL10*46", "PL10*71", "PL10*86", "10*110")
+  // Optionally followed by explicit length like "x 1200 LG" or ", 1200 LG"
+  const twoPartWithLg =
+    /(?:(?:PL|PLT|PLATE|FLAT|FL|FB|MS|CHQ|STRIP)[\s\-\.]*)?(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)?\s*[\*xX×]\s*(\d+(?:\.\d+)?)(?:[\s,xX×\*]+(\d+(?:\.\d+)?)\s*(?:LG\.?|LONG|MM))?/i;
+
+  const m2 = str.match(twoPartWithLg);
+  if (m2 && m2[1] && m2[2]) {
+    const n1 = parseFloat(m2[1]);
+    const n2 = parseFloat(m2[2]);
+    const n3 = m2[3] ? parseFloat(m2[3]) : null;
+
+    if (!isNaN(n1) && !isNaN(n2) && n1 > 0 && n2 > 0) {
+      if (n3 !== null && !isNaN(n3) && n3 > 0) {
+        // 3 values found (2 in callout + 1 length)
+        const sorted = [n1, n2, n3].sort((a, b) => b - a);
+        return {
+          length: sorted[0],
+          width: sorted[1],
+          thickness: sorted[2],
+          valuesCount: 3,
+        };
+      }
+
+      // User rule: if 2 values then width > thk
+      const sorted = [n1, n2].sort((a, b) => b - a);
+      return {
+        width: sorted[0],
+        thickness: sorted[1],
+        valuesCount: 2,
+      };
+    }
+  }
+
+  // 3. Fallback for "10 THK x 110" or "PL 10 THK 110"
+  const thkXWid = str.match(/(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)[,\s\*\-xX×]+(\d+(?:\.\d+)?)/i);
+  if (thkXWid && thkXWid[1] && thkXWid[2]) {
+    const n1 = parseFloat(thkXWid[1]);
+    const n2 = parseFloat(thkXWid[2]);
+    if (!isNaN(n1) && !isNaN(n2) && n1 > 0 && n2 > 0) {
+      const sorted = [n1, n2].sort((a, b) => b - a);
+      return {
+        width: sorted[0],
+        thickness: sorted[1],
+        valuesCount: 2,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Supports all industrial structural steel profile and cut sheet formats:
+ * - Direct plates (PL*, PLT*, PLATE*, FL*, FLAT*, FB*, MS*, pure numbers like 10*100)
+ * - Chequered plates (CHQ.PL 6 THK, 100 x 226, IS:3502)
+ * - Industrial descriptive callouts (PL.16THK. x 100 x 400 LG., PL 10 THK, 120 x 180 (CHF))
+ * - Indian/European standard beams (IPE200, ISMB150, ISMB 150x75, 1290 (CHF), NPB350X170X57.09, UB254X146X31, UC152X152X23)
+ * - Structural channels (ISMC125, ISMC150, ISMC200, ISMC 150x75, 1290 LG.)
+ * - Structural angles (ISA90X90X8, ISA75X75X6, ISA50X50X6, L65*65*6, ISA 75x75x8)
+ * Automatically scans across sheets and detects header rows even under title banners.
  */
 export async function parseExcelFile(file: File): Promise<{
   parts: Part[];
@@ -26,44 +120,82 @@ export async function parseExcelFile(file: File): Promise<{
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
 
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
+  if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
     throw new Error("Excel file is empty or has no readable sheets.");
   }
 
-  const sheet = workbook.Sheets[sheetName]!;
+  // 1. Find the best sheet containing BOM data and headers
+  const headerKeywords =
+    /profile|desc|description|item|mark|part|name|length|len|width|wid|qty|quantity|thk|thick|thickness|material|mat|grade|nos|pcs|size|drg|particular|section|dim|pos|piece|tag/i;
 
-  // 1. Convert sheet to matrix (array of arrays) for header row auto-detection
-  const matrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  let bestMatrix: any[][] = [];
+  let maxHeaderMatches = -1;
 
-  if (!matrix || matrix.length === 0) {
-    throw new Error("No data found in the selected sheet.");
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const m: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (!m || m.length === 0) continue;
+
+    for (let r = 0; r < Math.min(m.length, 15); r++) {
+      let matches = 0;
+      (m[r] || []).forEach((cell) => {
+        if (cell && headerKeywords.test(String(cell).trim())) {
+          matches++;
+        }
+      });
+      if (matches > maxHeaderMatches) {
+        maxHeaderMatches = matches;
+        bestMatrix = m;
+      }
+    }
   }
 
-  // 2. Find header row by scoring rows against common BOM column keywords
-  const headerKeywords =
-    /profile|desc|description|item|mark|part|name|length|len|width|wid|qty|quantity|thk|thick|thickness|material|mat|grade|nos|pcs|size|drg|particular|section/i;
+  if (bestMatrix.length === 0) {
+    throw new Error("No data found in any sheet of the uploaded file.");
+  }
 
-  let headerIdx = 0;
-  let maxMatches = 0;
+  return parseMatrixToParts(bestMatrix);
+}
+
+/**
+ * Parses a 2D matrix (from an Excel sheet or pasted spreadsheet grid) into Part[] and RejectedPart[]
+ */
+export function parseMatrixToParts(matrix: any[][]): {
+  parts: Part[];
+  rejectedParts: RejectedPart[];
+  materialsCount: number;
+} {
+  if (!matrix || matrix.length === 0) {
+    return { parts: [], rejectedParts: [], materialsCount: 0 };
+  }
+
+  const headerKeywords =
+    /profile|desc|description|item|mark|part|name|length|len|width|wid|qty|quantity|thk|thick|thickness|material|mat|grade|nos|pcs|size|drg|particular|section|dim|pos|piece|tag/i;
+
+  let bestHeaderIdx = 0;
+  let maxHeaderMatches = -1;
 
   for (let r = 0; r < Math.min(matrix.length, 15); r++) {
-    const row = matrix[r];
-    if (!Array.isArray(row)) continue;
     let matches = 0;
-    row.forEach((cell) => {
+    (matrix[r] || []).forEach((cell) => {
       if (cell && headerKeywords.test(String(cell).trim())) {
         matches++;
       }
     });
-    if (matches > maxMatches) {
-      maxMatches = matches;
-      headerIdx = r;
+    if (matches > maxHeaderMatches) {
+      maxHeaderMatches = matches;
+      bestHeaderIdx = r;
     }
   }
 
-  const headerRow: string[] = (matrix[headerIdx] || []).map((c) => String(c).trim());
-  const dataRowsMatrix = matrix.slice(headerIdx + 1);
+  const hasRecognizedHeaders = maxHeaderMatches >= 2;
+  const headerRow: string[] = hasRecognizedHeaders
+    ? (matrix[bestHeaderIdx] || []).map((c) => String(c).trim())
+    : [];
+  const dataRowsMatrix = hasRecognizedHeaders
+    ? matrix.slice(bestHeaderIdx + 1)
+    : matrix;
 
   if (dataRowsMatrix.length === 0) {
     throw new Error("No data rows found below sheet headers.");
@@ -78,14 +210,8 @@ export async function parseExcelFile(file: File): Promise<{
     return -1;
   };
 
-  const thkWidIdx = findKeyIndex([
-    /(?:thk|thick|thickness)[\s\-*xX×]*(?:wid|width|breadth)/i,
-    /(?:wid|width|breadth)[\s\-*xX×]*(?:thk|thick|thickness)/i,
-    /^t[\s*xX×]w$/i,
-    /^w[\s*xX×]t$/i,
-  ]);
-
   const itemIdx = findKeyIndex([
+    /^pos(?:\.|\b)/i,
     /^item\s*mark$/i,
     /^part\s*mark$/i,
     /^drg\s*\/?\s*qty$/i,
@@ -96,6 +222,10 @@ export async function parseExcelFile(file: File): Promise<{
     /^plate\s*no\.?$/i,
     /^mark\s*no\.?$/i,
     /^mark$/i,
+    /^tag$/i,
+    /^piece\s*no\.?$/i,
+    /^piece$/i,
+    /^member$/i,
     /^item$/i,
     /^part$/i,
     /^name$/i,
@@ -103,10 +233,6 @@ export async function parseExcelFile(file: File): Promise<{
     /part\s*name/i,
     /plate\s*name/i,
     /mark\s*name/i,
-    /^tag$/i,
-    /^pos$/i,
-    /^piece$/i,
-    /^member$/i,
     /^sr\.?\s*no\.?$/i,
     /^s\.no\.?$/i,
     /^sr$/i,
@@ -115,20 +241,30 @@ export async function parseExcelFile(file: File): Promise<{
   ]);
 
   const descIdx = findKeyIndex([
+    /profile\s*size/i,
+    /^profile$/i,
     /profile/i,
-    /desc/i,
+    /^dimension(?:s)?(?:\.|\b)/i,
+    /dim/i,
+    /^desc/i,
     /description/i,
     /particular/i,
     /detail/i,
     /section/i,
     /size/i,
     /specification/i,
-    /dim/i,
-    /^name$/i,
-    /name/i,
   ]);
 
-  const matIdx = findKeyIndex([/mat/i, /grade/i, /spec/i, /quality/i, /steel/i, /type/i]);
+  const matIdx = findKeyIndex([
+    /^material$/i,
+    /^mat$/i,
+    /material/i,
+    /grade/i,
+    /spec/i,
+    /quality/i,
+    /steel/i,
+    /type/i,
+  ]);
 
   const rawThkIdx = findKeyIndex([
     /^(?:thk|thick|thickness)$/i,
@@ -139,6 +275,13 @@ export async function parseExcelFile(file: File): Promise<{
     /gauge/i,
     /thk/i,
     /thick/i,
+  ]);
+
+  const thkWidIdx = findKeyIndex([
+    /(?:thk|thick|thickness)[\s\-*xX×]*(?:wid|width|breadth)/i,
+    /(?:wid|width|breadth)[\s\-*xX×]*(?:thk|thick|thickness)/i,
+    /^t[\s*xX×]w$/i,
+    /^w[\s*xX×]t$/i,
   ]);
   const thkIdx = rawThkIdx !== -1 && rawThkIdx !== thkWidIdx ? rawThkIdx : -1;
 
@@ -175,6 +318,8 @@ export async function parseExcelFile(file: File): Promise<{
     /total\s*quantity/i,
     /net\s*qty/i,
     /final\s*qty/i,
+    /^q\.?ty$/i,
+    /q\.?ty/i,
     /^qty$/i,
     /^quantity$/i,
     /^nos$/i,
@@ -186,6 +331,14 @@ export async function parseExcelFile(file: File): Promise<{
     /count/i,
     /num/i,
   ]);
+
+  const effItemIdx = itemIdx !== -1 ? itemIdx : (!hasRecognizedHeaders ? 0 : -1);
+  const effDescIdx = descIdx !== -1 ? descIdx : (!hasRecognizedHeaders ? 1 : -1);
+  const effMatIdx = matIdx !== -1 ? matIdx : (!hasRecognizedHeaders ? 2 : -1);
+  const effThkIdx = thkIdx !== -1 ? thkIdx : (!hasRecognizedHeaders ? 3 : -1);
+  const effLenIdx = lenIdx !== -1 ? lenIdx : (!hasRecognizedHeaders ? 4 : -1);
+  const effWidIdx = widIdx !== -1 ? widIdx : (!hasRecognizedHeaders ? 5 : -1);
+  const effQtyIdx = qtyIdx !== -1 ? qtyIdx : (!hasRecognizedHeaders ? 6 : -1);
 
   const parseNum = (v: any): number | null => {
     if (v === undefined || v === null || v === "") return null;
@@ -205,13 +358,13 @@ export async function parseExcelFile(file: File): Promise<{
     const rawValues = rowCells.map((v) => String(v).trim());
     if (rawValues.every((v) => !v)) return; // Skip empty rows
 
-    // 1. Description & Item
-    let description = descIdx !== -1 && rowCells[descIdx] ? String(rowCells[descIdx]).trim() : "";
+    // 1. Description & Profile Name
+    let description = effDescIdx !== -1 && rowCells[effDescIdx] ? String(rowCells[effDescIdx]).trim() : "";
     if (!description && thkWidIdx !== -1 && rowCells[thkWidIdx]) {
       description = String(rowCells[thkWidIdx]).trim();
     }
     if (!description && rawValues.length > 0) {
-      description = rawValues.find((v, c) => c !== itemIdx && v.trim()) || rawValues[0] || "";
+      description = rawValues.find((v, c) => c !== effItemIdx && v.trim()) || rawValues[0] || "";
     }
 
     // Skip Summary / Grand Total rows
@@ -224,28 +377,33 @@ export async function parseExcelFile(file: File): Promise<{
       return;
     }
 
+    // 2. Item Mark
     let rawItem = "";
-    if (itemIdx !== -1 && rowCells[itemIdx] !== undefined) {
-      const cellVal = String(rowCells[itemIdx]).trim();
+    if (effItemIdx !== -1 && rowCells[effItemIdx] !== undefined) {
+      const cellVal = String(rowCells[effItemIdx]).trim();
       if (cellVal) {
-        // Clean drawing mark references like "(B13 x 2)" or "(B4 x 3, B5 x 1)"
-        const drgClean = cellVal.replace(/[()]/g, "").split(/[xX×,]/)[0].trim();
+        // Clean drawing mark references like "(B13 x 2)" or "(B4 x 3, B5 x 1)" or "(WR1 x 1)"
+        const parts = cellVal.replace(/[()]/g, "").split(/[xX×,]/);
+        const drgClean = (parts[0] ?? "").trim();
         rawItem = drgClean || cellVal;
       }
     }
 
-    // If no explicit item mark was found in the sheet columns (e.g. edsad.xlsx with only Qty, profile, length):
-    // Generate clean distinct item marks P-001, P-002, etc. so parts are distinguished and tracked in the model!
+    // Auto-generate clean distinct item mark P-001, P-002, etc. if no explicit column existed
     if (!rawItem) {
       rawItem = `P-${String(idx + 1).padStart(3, "0")}`;
     }
 
     const item = rawItem;
 
-    // 2. Material Grade
-    let rawMat = matIdx !== -1 && rowCells[matIdx] !== undefined ? String(rowCells[matIdx]).trim() : "";
-    if (!rawMat && rawValues.length > 3) {
-      rawMat = rawValues[3] || "";
+    // 3. Material Grade
+    let rawMat = "";
+    if (effMatIdx !== -1 && rowCells[effMatIdx] !== undefined) {
+      const mStr = String(rowCells[effMatIdx]).trim();
+      // Ensure material column value is not a pure number (e.g. from shifted quantity/weight columns)
+      if (mStr && !/^\d+(?:\.\d+)?$/.test(mStr)) {
+        rawMat = mStr;
+      }
     }
 
     let material = rawMat.toUpperCase();
@@ -267,13 +425,13 @@ export async function parseExcelFile(file: File): Promise<{
       }
     }
 
-    // 3. Raw Cell numbers parsing from columns
-    let thickness = thkIdx !== -1 ? parseNum(rowCells[thkIdx]) : null;
-    let length = lenIdx !== -1 ? parseNum(rowCells[lenIdx]) : null;
-    let width = widIdx !== -1 ? parseNum(rowCells[widIdx]) : null;
-    let qty = qtyIdx !== -1 ? parseNum(rowCells[qtyIdx]) : null;
+    // 4. Raw Cell Numbers Parsing from dedicated columns
+    let thickness = effThkIdx !== -1 ? parseNum(rowCells[effThkIdx]) : null;
+    let length = effLenIdx !== -1 ? parseNum(rowCells[effLenIdx]) : null;
+    let width = effWidIdx !== -1 ? parseNum(rowCells[effWidIdx]) : null;
+    let qty = effQtyIdx !== -1 ? parseNum(rowCells[effQtyIdx]) : null;
 
-    // Combined thickness * width column parsing
+    // Combined thickness * width column parsing (e.g. "10*100")
     if (thkWidIdx !== -1 && rowCells[thkWidIdx] !== undefined) {
       const cellStr = String(rowCells[thkWidIdx]).trim();
       const twMatch = cellStr.match(/(\d+(?:\.\d+)?)\s*[\*xX×]\s*(\d+(?:\.\d+)?)/);
@@ -302,10 +460,10 @@ export async function parseExcelFile(file: File): Promise<{
     }
     if (qty === null) qty = 1;
 
-    // 4. INTELLIGENT DESCRIPTION REGEX EXTRACTION (FOR STEEL PROFILES & PLATES)
+    // 5. INTELLIGENT DESCRIPTION & PROFILE EXTRACTION
     let foundDimInDesc = false;
 
-    // Extract Thickness from description if THK keyword is present
+    // Check for explicit THK in description (e.g. "PL 6 THK", "PL.16THK.", "CHQ.PL 6 THK", "10 THK")
     const thkMatch =
       description.match(/(?:PL|CHQ|PLATE)?[\.\s]*(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)\b/i) ||
       description.match(/\b(\d+(?:\.\d+)?)\s*(?:THK|THICK|TH)\b/i);
@@ -316,8 +474,8 @@ export async function parseExcelFile(file: File): Promise<{
       }
     }
 
-    // Extract trailing Length (e.g., "1290 LG" or "3220 LG" or "1000 MM")
-    const lgMatch = description.match(/\b(\d+(?:\.\d+)?)\s*(?:LG|LONG|MM)\b/i);
+    // Check for explicit LG / Length in description (e.g. "1290 LG", "400 LG.", "180 LG")
+    const lgMatch = description.match(/\b(\d+(?:\.\d+)?)\s*(?:LG\.?|LONG|MM)\b/i);
     if (lgMatch && lgMatch[1]) {
       const descLen = parseFloat(lgMatch[1]);
       if (!isNaN(descLen) && descLen > 0) {
@@ -325,114 +483,136 @@ export async function parseExcelFile(file: File): Promise<{
       }
     }
 
-    // Pattern A: Profile with Thickness * Width
-    // Supports prefixed: PL10*100, PL 10*100, PLT10*100, PLATE 10*100, FL 10*100, FLAT 100x10, FB 10*100, MS 10*100
-    // AND pure numeric: 10*100, 10 * 100, 10x100, 10 x 100, 10X100, 10.0*100, 10*100mm, etc.
-    const plMatch = description.match(
-      /(?:(?:PL|PLT|PLATE|FLAT|FL|FB|MS)[\s\-]*)?(\d+(?:\.\d+)?)\s*[\*xX×]\s*(\d+(?:\.\d+)?)(?:\s*[\*xX×]\s*(\d+(?:\.\d+)?))?/i,
+    // Pattern A: Structural Beams (IPE200, ISMB150, ISMB 150x75, 1290 (CHF), NPB350X170X57.09, UB254X146X31, UC152X152X23)
+    const beamMatch = description.match(
+      /^(?:NPB|ISMB|ISWB|ISNB|UB|UC|IPE|HEB|HEA|BEAM)[\s\-]*(\d+(?:\.\d+)?)(?:\s*[xX×\*]\s*(\d+(?:\.\d+)?))?(?:[\s,xX×\-]+(\d+(?:\.\d+)?))?/i,
     );
-    if (plMatch && plMatch[1] && plMatch[2]) {
-      const d1 = parseFloat(plMatch[1]);
-      const d2 = parseFloat(plMatch[2]);
-      if (plMatch[3]) {
-        // 3 dimensions in profile: T * W * L (e.g. PL10*100*130 or 10*100*130)
-        const d3 = parseFloat(plMatch[3]);
-        const dims = [d1, d2, d3].sort((a, b) => a - b);
-        thickness = dims[0];
-        width = dims[1];
-        length = dims[2];
-        foundDimInDesc = true;
-      } else {
-        // 2 dimensions in profile: Thickness * Width (e.g. PL10*100, 10*100, 14*50)
-        const tCandidate = Math.min(d1, d2);
-        const wCandidate = Math.max(d1, d2);
-        thickness = tCandidate;
-        width = wCandidate;
+    if (beamMatch && beamMatch[1]) {
+      const depth = parseFloat(beamMatch[1]);
+      const flange = beamMatch[2] ? parseFloat(beamMatch[2]) : null;
+      width = flange || depth;
+      if (thickness === null) thickness = 10;
+      if ((length === null || length <= 0) && beamMatch[3]) {
+        const candidateLen = parseFloat(beamMatch[3]);
+        if (candidateLen >= 80) {
+          length = candidateLen;
+        }
+      }
+      foundDimInDesc = true;
+    }
 
-        if (length !== null && length > 0) {
-          // Length is provided in length column (e.g. edsad.xlsx where length is in column 2)
-          // Ensure width <= length orientation for standard nesting rectangle representation
-          if (width > length) {
-            const temp = width;
-            width = length;
-            length = temp;
+    // Pattern B: Structural Channels (ISMC 150x75, 1290 LG. or ISMC125, ISMC150, ISMC200)
+    if (!foundDimInDesc) {
+      const ismcMatch = description.match(
+        /^(?:ISMC|CHANNEL|MC)[\s\-]*(\d+(?:\.\d+)?)(?:\s*[xX×\*]\s*(\d+(?:\.\d+)?))?(?:[\s,xX×\-]+(\d+(?:\.\d+)?))?/i,
+      );
+      if (ismcMatch && ismcMatch[1]) {
+        const depth = parseFloat(ismcMatch[1]);
+        const flange = ismcMatch[2] ? parseFloat(ismcMatch[2]) : null;
+        width = flange || depth;
+        if (thickness === null) thickness = 8;
+        if ((length === null || length <= 0) && ismcMatch[3]) {
+          const candidateLen = parseFloat(ismcMatch[3]);
+          if (candidateLen >= 80) {
+            length = candidateLen;
           }
         }
         foundDimInDesc = true;
       }
     }
 
-    // Pattern B: ISA angle section e.g. ISA50X50X6 or ISA 50X50X6
+    // Pattern C: Structural Angles (ISA90X90X8, ISA75X75X6, ISA50X50X6, L65*65*6, ISA 75x75x8)
     if (!foundDimInDesc) {
       const isaMatch = description.match(
-        /(?:ISA|ANGLE|L)[\s\-]*(\d+(?:\.\d+)?)\s*[xX×\*]\s*(\d+(?:\.\d+)?)\s*[xX×\*]\s*(\d+(?:\.\d+)?)/i,
+        /^(?:ISA|ANGLE|L)[\s\-]*(\d+(?:\.\d+)?)\s*[xX×\*]\s*(\d+(?:\.\d+)?)\s*[xX×\*]\s*(\d+(?:\.\d+)?)/i,
       );
-      if (isaMatch && isaMatch[1] && isaMatch[3]) {
-        width = parseFloat(isaMatch[1]);
-        thickness = parseFloat(isaMatch[3]);
+      if (isaMatch && isaMatch[1] && isaMatch[2] && isaMatch[3]) {
+        const leg1 = parseFloat(isaMatch[1]);
+        const leg2 = parseFloat(isaMatch[2]);
+        const t = parseFloat(isaMatch[3]);
+        width = Math.max(leg1, leg2);
+        thickness = t;
         foundDimInDesc = true;
       }
     }
 
-    // Pattern C: Channel section e.g. ISMC125 or ISMC150 or ISMC 150x75
-    if (!foundDimInDesc) {
-      const ismcMatch = description.match(/(?:ISMC|CHANNEL|MC)[\s\-]*(\d+(?:\.\d+)?)(?:\s*[xX×\*]\s*(\d+(?:\.\d+)?))?/i);
-      if (ismcMatch && ismcMatch[1]) {
-        width = parseFloat(ismcMatch[1]);
-        if (thickness === null) thickness = 10;
-        foundDimInDesc = true;
-      }
-    }
-
-    // Pattern D: Beam section e.g. NPB350X170X57.09 or ISMB200
-    if (!foundDimInDesc) {
-      const beamMatch = description.match(
-        /(?:NPB|ISMB|ISWB|ISNB|UB|UC|BEAM)[\s\-]*(\d+(?:\.\d+)?)(?:\s*[xX×\*]\s*(\d+(?:\.\d+)?))?/i,
-      );
-      if (beamMatch && beamMatch[1]) {
-        const depth = parseFloat(beamMatch[1]);
-        const flange = beamMatch[2] ? parseFloat(beamMatch[2]) : depth;
-        width = flange;
-        if (thickness === null) thickness = 10;
-        foundDimInDesc = true;
-      }
-    }
-
-    // Pattern E: Explicit W x L or THK in description (e.g. "200 x 300")
-    if (!foundDimInDesc) {
-      const dimMatch = description.match(/\b(\d+(?:\.\d+)?)\s*[xX×\*]\s*(\d+(?:\.\d+)?)\b/);
-      if (dimMatch && dimMatch[1] && dimMatch[2]) {
-        const d1 = parseFloat(dimMatch[1]);
-        const d2 = parseFloat(dimMatch[2]);
+    // Pattern D: Explicit THK plate descriptions (e.g. "PL 6 THK, 100 x 226", "PL.16THK. x 100 x 400 LG.")
+    if (!foundDimInDesc && thickness !== null && thickness > 0) {
+      const wlMatch = description.match(/\b(\d+(?:\.\d+)?)\s*[\*xX×]\s*(\d+(?:\.\d+)?)\b/);
+      if (wlMatch && wlMatch[1] && wlMatch[2]) {
+        const d1 = parseFloat(wlMatch[1]);
+        const d2 = parseFloat(wlMatch[2]);
         if (!isNaN(d1) && !isNaN(d2) && d1 > 0 && d2 > 0) {
-          length = Math.max(d1, d2);
           width = Math.min(d1, d2);
+          if (length === null || length <= 0) {
+            length = Math.max(d1, d2);
+          }
           foundDimInDesc = true;
         }
       }
     }
 
-    if (length && width && length > 0 && width > 0) {
-      foundDimInDesc = true;
+    // Pattern E: Standard Plates / Flats (PL10*110, PL10*150, PL10*257, PL10*46, etc.)
+    // User Rule:
+    // - If 3 values: len > width > thickness
+    // - If 2 values: width > thk
+    if (!foundDimInDesc) {
+      let extracted = extractDimensionsFromText(description) || extractDimensionsFromText(item);
+      if (!extracted) {
+        for (const cVal of rawValues) {
+          if (cVal) {
+            extracted = extractDimensionsFromText(cVal);
+            if (extracted) break;
+          }
+        }
+      }
+
+      if (extracted) {
+        if (extracted.valuesCount === 3) {
+          length = extracted.length!;
+          width = extracted.width!;
+          thickness = extracted.thickness!;
+          foundDimInDesc = true;
+        } else if (extracted.valuesCount === 2) {
+          width = extracted.width!;
+          thickness = extracted.thickness!;
+
+          // If length was not already given by dedicated column, look for length in other row cells
+          if (length === null || length <= 0) {
+            for (let c = 0; c < rowCells.length; c++) {
+              if (c !== effItemIdx && c !== effDescIdx && c !== effThkIdx && c !== effWidIdx && c !== effQtyIdx) {
+                const n = parseNum(rowCells[c]);
+                if (n && n > 0 && n !== width && n !== thickness && (qty === null || n !== qty)) {
+                  length = n;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (length !== null && length > 0) {
+            foundDimInDesc = true;
+          }
+        }
+      }
     }
 
-    // 5. STRICT VALIDATION RULES FOR FABRICATION PLATES
+    // Ensure standard width <= length rectangle orientation
+    if (width !== null && length !== null && width > length) {
+      const temp = width;
+      width = length;
+      length = temp;
+    }
+
+    // 6. VALIDATION RULES
     let rejectionReason: string | null = null;
 
-    // Check if the component is a structural long profile (Angle, Channel, Beam, Tube) rather than a 2D flat plate
-    const isStructuralProfile =
-      /^(?:ISA|ANGLE|ISMC|CHANNEL|MC|NPB|ISMB|ISWB|ISNB|ISLB|UB|UC|BEAM|RHS|SHS|PIPE|TUBE)\b/i.test(description) ||
-      /^(?:ISA|ISMC|NPB|ISMB|ISWB|UB|UC|RHS|SHS|PIPE)/i.test(description) ||
-      /^(?:ISA|ISMC|NPB|ISMB|ISWB|UB|UC|RHS|SHS|PIPE)/i.test(item);
-
-    if (isStructuralProfile) {
-      rejectionReason = `Structural section profile (${description || item}) — 2D sheet nesting is for flat plates only`;
-    } else if (!foundDimInDesc || length === null || width === null || length <= 0 || width <= 0) {
-      rejectionReason = "Missing or unparseable plate dimensions (L x W) in description or columns";
-    } else if (length > 12000) {
-      rejectionReason = `Length (${length.toLocaleString()} mm) exceeds max stock plate limit (12,000 mm)`;
-    } else if (width > 3000) {
-      rejectionReason = `Width (${width.toLocaleString()} mm) exceeds max stock plate limit (3,000 mm)`;
+    if (!foundDimInDesc || length === null || width === null || length <= 0 || width <= 0) {
+      rejectionReason = "Missing plate dimensions (L x W) in description or columns";
+    } else if (length > 25000) {
+      rejectionReason = `Length (${length.toLocaleString()} mm) exceeds maximum processing limit (25,000 mm)`;
+    } else if (width > 5000) {
+      rejectionReason = `Width (${width.toLocaleString()} mm) exceeds maximum plate width limit (5,000 mm)`;
     } else if (qty === null || qty <= 0) {
       rejectionReason = "Invalid or zero quantity";
     }
@@ -468,4 +648,3 @@ export async function parseExcelFile(file: File): Promise<{
 
   return { parts, rejectedParts, materialsCount };
 }
-

@@ -12,8 +12,9 @@ import {
 import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { NestedSheet, OptimizationResult } from "@/lib/nesting";
+import { type NestedSheet, type OptimizationResult, computeSheetUtilizedDimensions } from "@/lib/nesting";
 import { useAppState } from "@/lib/store";
+import { ThicknessLengthSummaryTable } from "@/components/app/thickness-length-summary-table";
 
 const LIGHT_COLOR_PALETTE = [
   "#93c5fd", // Soft Blue
@@ -338,30 +339,45 @@ function ThicknessGroupCanvas({
                   .slice(0, sIdx)
                   .reduce((sum, s) => sum + s.sheetWidth + spacingY, 0);
                 const remnantOffcuts = computeRemnantOffcuts(sheet);
+                const kerf = result.config.kerf ?? 5;
+                const utilized = computeSheetUtilizedDimensions(sheet, kerf);
 
                 return (
                   <g key={sheet.id} transform={`translate(0, ${offsetY})`}>
                     {/* Sheet Header Banner inside SVG */}
                     <rect
                       x={-10}
-                      y={-45}
+                      y={-48}
                       width={sheet.sheetLength + 20}
-                      height={34}
+                      height={38}
                       fill="#0f172a"
                       rx={6}
                     />
                     <text
                       x={12}
-                      y={-23}
+                      y={-24}
                       fill="#ffffff"
-                      fontSize={16 * textSizeScale}
+                      fontSize={15 * textSizeScale}
                       fontWeight="800"
                       fontFamily="sans-serif"
                     >
                       SHEET {sheet.id} OF {sheets.length} · {sheet.material} · THICKNESS:{" "}
-                      {sheet.thickness} mm · STOCK SIZE: {sheet.sheetLength.toLocaleString()} ×{" "}
+                      {sheet.thickness} mm · STOCK: {sheet.sheetLength.toLocaleString()} ×{" "}
                       {sheet.sheetWidth.toLocaleString()} mm ({sheet.utilization.toFixed(1)}% yield)
                     </text>
+                    {sheet.placed.length > 0 ? (
+                      <text
+                        x={sheet.sheetLength + 10}
+                        y={-24}
+                        textAnchor="end"
+                        fill="#38bdf8"
+                        fontSize={14 * textSizeScale}
+                        fontWeight="800"
+                        fontFamily="sans-serif"
+                      >
+                        REQUIRED CUT: {utilized.requiredCutSizeStr} · REMNANT: {utilized.primaryRemnant.formatted}
+                      </text>
+                    ) : null}
 
                     {/* Main Stock Plate Background */}
                     <rect
@@ -392,6 +408,41 @@ function ThicknessGroupCanvas({
                       strokeWidth={2}
                       strokeDasharray="8 8"
                     />
+
+                    {/* Active Utilized / Required Cut Bounding Box */}
+                    {sheet.placed.length > 0 ? (
+                      <g pointerEvents="none">
+                        <rect
+                          x={0}
+                          y={0}
+                          width={Math.min(utilized.usedLength, sheet.sheetLength)}
+                          height={Math.min(utilized.usedWidth, sheet.sheetWidth)}
+                          fill="none"
+                          stroke="#2563eb"
+                          strokeWidth={3}
+                          strokeDasharray="10 6"
+                        />
+                        <rect
+                          x={2}
+                          y={Math.max(2, Math.min(utilized.usedWidth, sheet.sheetWidth) - 24)}
+                          width={Math.min(280, Math.min(utilized.usedLength, sheet.sheetLength) - 4)}
+                          height={22}
+                          fill="#1e3a8a"
+                          fillOpacity={0.92}
+                          rx={4}
+                        />
+                        <text
+                          x={8}
+                          y={Math.max(2, Math.min(utilized.usedWidth, sheet.sheetWidth) - 24) + 15}
+                          fill="#93c5fd"
+                          fontSize={12 * textSizeScale}
+                          fontWeight="900"
+                          fontFamily="sans-serif"
+                        >
+                          REQUIRED CUT: {utilized.requiredCutSizeStr}
+                        </text>
+                      </g>
+                    ) : null}
 
                     {/* 1. SCRAP / REMNANT OFFCUT ZONES */}
                     {remnantOffcuts.map((o) => {
@@ -458,7 +509,7 @@ function ThicknessGroupCanvas({
                               fontWeight="bold"
                               fontFamily="sans-serif"
                             >
-                              SCRAP / OFFCUT ({o.w.toLocaleString()} × {o.h.toLocaleString()} mm)
+                              REMAINING REMNANT ({o.w.toLocaleString()} × {o.h.toLocaleString()} mm)
                             </text>
                           ) : null}
                         </g>
@@ -762,6 +813,14 @@ export function PlateCutDiagramSection({ result }: { result: OptimizationResult 
 
   return (
     <div className="mt-6 space-y-6">
+      {/* Executive Plate Cut Length & Procurement Summary Table */}
+      <ThicknessLengthSummaryTable
+        sheets={result.sheets}
+        kerf={result.config.kerf}
+        title="Plate Cut Length & Procurement Summary"
+        subtitle="Exact required plate cut lengths and totals grouped by plate thickness"
+      />
+
       {/* Header & Controls Bar */}
       <div className="rounded-2xl border bg-card p-5 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
