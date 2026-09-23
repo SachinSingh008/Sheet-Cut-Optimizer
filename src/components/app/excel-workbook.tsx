@@ -320,7 +320,15 @@ function createBlankRows(rowCount: number, colCount: number): string[][] {
   return Array.from({ length: rowCount }, () => Array(colCount).fill(""));
 }
 
-export function ExcelWorkbook({ onApplied }: { onApplied?: () => void }) {
+export function ExcelWorkbook({
+  onApplied,
+  importedParts,
+  importedFileName,
+}: {
+  onApplied?: () => void;
+  importedParts?: Part[];
+  importedFileName?: string;
+}) {
   // Columns State — starts completely BLANK at start (titles and fields empty)
   const [columns, setColumns] = useState<WorkbookColumn[]>(() => createBlankColumns(7));
 
@@ -392,6 +400,44 @@ export function ExcelWorkbook({ onApplied }: { onApplied?: () => void }) {
     },
     [historyIdx],
   );
+
+  // When external parts are imported (e.g. from uploaded Excel or OCR), populate workbook
+  const lastImportedRef = useRef<Part[] | null>(null);
+
+  useEffect(() => {
+    if (importedParts && importedParts.length > 0 && importedParts !== lastImportedRef.current) {
+      lastImportedRef.current = importedParts;
+      const sampleCols: WorkbookColumn[] = SAMPLE_COLUMNS_DEF.map((def, idx) => ({
+        id: `col-imported-${idx}`,
+        letter: getColumnLetter(idx),
+        field: def.field,
+        title: def.title,
+        width: def.field === "description" ? 200 : 140,
+        align: def.field === "item" || def.field === "description" || def.field === "material" ? "left" : "right",
+        placeholder: `Col ${getColumnLetter(idx)} Name...`,
+      }));
+
+      const newGrid: string[][] = importedParts.map((p) => [
+        p.item,
+        p.description || p.item,
+        p.material,
+        String(p.thickness),
+        String(p.length),
+        String(p.width),
+        String(p.qty),
+      ]);
+
+      setColumns(sampleCols);
+      commitToHistory(newGrid);
+      setSelectedCell({ r: 0, c: 0 });
+      setSelectionRange({ startR: 0, startC: 0, endR: Math.max(0, newGrid.length - 1), endC: 6 });
+      toast.success(`Loaded ${importedParts.length} parts into Excel Workbook!`, {
+        description: importedFileName
+          ? `Extracted from "${importedFileName}". All columns mapped and ready for editing or optimization.`
+          : "All columns mapped and ready for editing or optimization.",
+      });
+    }
+  }, [importedParts, importedFileName, commitToHistory]);
 
   const handleUndo = useCallback(() => {
     if (historyIdx > 0) {
@@ -1273,7 +1319,7 @@ export function ExcelWorkbook({ onApplied }: { onApplied?: () => void }) {
               <h3 className="font-bold text-sm text-white tracking-wide flex items-center gap-1.5">
                 <span>Excel Live BOM Workbook</span>
                 <span className="text-[10px] uppercase font-mono bg-white/20 px-2 py-0.5 rounded-md font-semibold">
-                  Blank Canvas · Map * Required
+                  {importedFileName ? `Imported: ${importedFileName}` : "Interactive Grid · Map * Required"}
                 </span>
               </h3>
             </div>

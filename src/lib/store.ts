@@ -32,7 +32,7 @@ export type AppState = {
 
 const defaultConfig: OptimizationConfig = {
   sheetLength: 6000,
-  sheetWidth: 2000,
+  sheetWidth: 1500,
   kerf: 3,
   trim: 0,
   rotation: true,
@@ -44,9 +44,9 @@ const defaultConfig: OptimizationConfig = {
       id: "stock-user-1",
       material: "IS2062",
       thickness: null,
-      sheetWidth: 2000,
+      sheetWidth: 1500,
       sheetLength: 6000,
-      description: "Available Workshop Stock Plate (2000×6000 mm)",
+      description: "Available Workshop Stock Plate (1500×6000 mm)",
     },
   ],
 };

@@ -255,11 +255,11 @@ export function CustomStockSheetPanel({
   const handleAddRule = (preset?: Partial<CustomStockSheetRule>) => {
     const newRule: CustomStockSheetRule = {
       id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      material: preset?.material ?? "CHQ",
-      thickness: preset?.thickness !== undefined ? preset.thickness : 4,
-      sheetWidth: preset?.sheetWidth ?? 2000,
+      material: preset?.material ?? "IS2062",
+      thickness: preset?.thickness !== undefined ? preset.thickness : null,
+      sheetWidth: preset?.sheetWidth ?? 1500,
       sheetLength: preset?.sheetLength ?? 6000,
-      description: preset?.description ?? "Custom Workshop Stock Plate",
+      description: preset?.description ?? "Available Workshop Stock Plate (1500×6000 mm)",
     };
     store.addCustomStockSheet(newRule);
     toast.success("Added Custom Stock Sheet Size", {
@@ -396,23 +396,39 @@ export function CustomStockSheetPanel({
               type="button"
               onClick={() =>
                 handleAddRule({
-                  material: "MS",
+                  material: "IS2062",
                   thickness: null,
-                  sheetWidth: 2000,
+                  sheetWidth: 1500,
                   sheetLength: 6000,
-                  description: "Available MS Plate (2000×6000 mm)",
+                  description: "Available Workshop Stock Plate (1500×6000 mm)",
                 })
               }
               className="flex-1 h-7.5 px-3 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="size-3.5" />
-              <span>Add Stock Size</span>
+              <span>Add Stock Size (1500×6000)</span>
             </button>
           </div>
 
           {/* Quick Preset Buttons */}
           <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
             <span className="text-[10px] text-muted-foreground font-mono font-semibold">Presets:</span>
+            <button
+              type="button"
+              onClick={() =>
+                handleAddRule({
+                  material: "IS2062",
+                  thickness: null,
+                  sheetWidth: 1500,
+                  sheetLength: 6000,
+                  description: "Standard MS stock plate: 1500×6000 mm",
+                })
+              }
+              className="text-[10.5px] font-mono font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-950 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-700 rounded px-2 py-0.5 transition-colors cursor-pointer"
+              title="Add 1500x6000 mm Standard Workshop Plate"
+            >
+              + 1500×6000 (Default)
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -437,13 +453,13 @@ export function CustomStockSheetPanel({
                   thickness: null,
                   sheetWidth: 2000,
                   sheetLength: 6000,
-                  description: "Standard MS stock plate: 2000×6000 mm",
+                  description: "Wide plate: 2000×6000 mm",
                 })
               }
               className="text-[10.5px] font-mono font-bold bg-sky-100 hover:bg-sky-200 text-sky-900 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/60 border border-sky-300 dark:border-sky-700 rounded px-2 py-0.5 transition-colors cursor-pointer"
-              title="Add MS 2000x6000 mm"
+              title="Add MS 2000x6000 mm Wide Plate"
             >
-              + MS 2000×6000 (All)
+              + 2000×6000 (Wide)
             </button>
             <button
               type="button"

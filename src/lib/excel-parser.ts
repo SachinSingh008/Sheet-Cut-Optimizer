@@ -124,38 +124,102 @@ export async function parseExcelFile(file: File): Promise<{
     throw new Error("Excel file is empty or has no readable sheets.");
   }
 
-  // 1. Find the best sheet containing BOM data and headers
-  const headerKeywords =
-    /profile|desc|description|item|mark|part|name|length|len|width|wid|qty|quantity|thk|thick|thickness|material|mat|grade|nos|pcs|size|drg|particular|section|dim|pos|piece|tag/i;
-
-  let bestMatrix: any[][] = [];
-  let maxHeaderMatches = -1;
+  // Find the highest-scoring candidate table across all sheets and all row offsets
+  let bestCandidate: {
+    sheetName: string;
+    headerRowIdx: number;
+    score: number;
+    matrix: any[][];
+  } | null = null;
 
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
-    const m: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-    if (!m || m.length === 0) continue;
+    const matrix: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (!matrix || matrix.length === 0) continue;
 
-    for (let r = 0; r < Math.min(m.length, 15); r++) {
-      let matches = 0;
-      (m[r] || []).forEach((cell) => {
-        if (cell && headerKeywords.test(String(cell).trim())) {
-          matches++;
-        }
+    for (let r = 0; r < matrix.length; r++) {
+      const row = matrix[r] || [];
+      if (!row || row.length === 0) continue;
+
+      let hasPart = false;
+      let hasLen = false;
+      let hasWid = false;
+      let hasThk = false;
+      let hasQty = false;
+      let hasMat = false;
+      let hasDesc = false;
+
+      row.forEach((cell) => {
+        const s = String(cell).trim().toLowerCase();
+        if (/part\s*file|part\s*name|item\s*mark|part\s*mark|^drg\b|^pos\b|^item\b|^piece\b/i.test(s)) hasPart = true;
+        if (/^length|^len\b|size\s*x/i.test(s)) hasLen = true;
+        if (/^width|^wid\b|size\s*y/i.test(s)) hasWid = true;
+        if (/^thk|thick/i.test(s)) hasThk = true;
+        if (/^qty|quantity|q\.?ty|nos|pcs/i.test(s)) hasQty = true;
+        if (/^material|^mat\b|^grade\b/i.test(s)) hasMat = true;
+        if (/^desc|description|profile/i.test(s)) hasDesc = true;
       });
-      if (matches > maxHeaderMatches) {
-        maxHeaderMatches = matches;
-        bestMatrix = m;
+
+      let score = 0;
+      if (hasPart) score += 12;
+      if (hasLen && hasWid) score += 10;
+      else if (hasLen || hasWid) score += 5;
+      if (hasThk) score += 6;
+      if (hasQty) score += 6;
+      if (hasMat) score += 4;
+      if (hasDesc) score += 8;
+
+      // Check row context before this row
+      const prevRowStr = (matrix[r - 1] || []).join(" ").toLowerCase();
+      const prevPrevRowStr = (matrix[r - 2] || []).join(" ").toLowerCase();
+      if (prevRowStr.includes("parts") || prevPrevRowStr.includes("parts")) {
+        score += 15;
+      }
+      if (prevRowStr.includes("subnests") || prevPrevRowStr.includes("subnests")) {
+        score -= 5;
+      }
+
+      if (score >= 12) {
+        let dataRowCount = 0;
+        for (let d = r + 1; d < matrix.length; d++) {
+          const dRow = matrix[d] || [];
+          if (dRow.some((c) => c !== "")) {
+            dataRowCount++;
+          } else {
+            if (dataRowCount > 0) break;
+          }
+        }
+
+        const candidate = {
+          sheetName,
+          headerRowIdx: r,
+          score: score + Math.min(dataRowCount, 50),
+          matrix: matrix.slice(r),
+        };
+
+        if (
+          !bestCandidate ||
+          candidate.score > bestCandidate.score ||
+          (candidate.score === bestCandidate.score && candidate.matrix.length > bestCandidate.matrix.length)
+        ) {
+          bestCandidate = candidate;
+        }
       }
     }
   }
 
-  if (bestMatrix.length === 0) {
-    throw new Error("No data found in any sheet of the uploaded file.");
+  if (bestCandidate) {
+    return parseMatrixToParts(bestCandidate.matrix);
   }
 
-  return parseMatrixToParts(bestMatrix);
+  // Fallback to first sheet
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const m: any[][] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
+  if (!m || m.length === 0) {
+    throw new Error("No data found in any sheet of the uploaded file.");
+  }
+  return parseMatrixToParts(m);
 }
 
 /**
@@ -170,32 +234,71 @@ export function parseMatrixToParts(matrix: any[][]): {
     return { parts: [], rejectedParts: [], materialsCount: 0 };
   }
 
-  const headerKeywords =
-    /profile|desc|description|item|mark|part|name|length|len|width|wid|qty|quantity|thk|thick|thickness|material|mat|grade|nos|pcs|size|drg|particular|section|dim|pos|piece|tag/i;
-
+  // Find best candidate header row within the matrix
   let bestHeaderIdx = 0;
-  let maxHeaderMatches = -1;
+  let maxScore = -1;
 
-  for (let r = 0; r < Math.min(matrix.length, 15); r++) {
-    let matches = 0;
-    (matrix[r] || []).forEach((cell) => {
-      if (cell && headerKeywords.test(String(cell).trim())) {
-        matches++;
-      }
+  for (let r = 0; r < Math.min(matrix.length, 60); r++) {
+    const row = matrix[r] || [];
+    let hasPart = false;
+    let hasLen = false;
+    let hasWid = false;
+    let hasThk = false;
+    let hasQty = false;
+    let hasMat = false;
+    let hasDesc = false;
+
+    row.forEach((cell) => {
+      const s = String(cell).trim().toLowerCase();
+      if (/part\s*file|part\s*name|item\s*mark|part\s*mark|^drg\b|^pos\b|^item\b|^piece\b/i.test(s)) hasPart = true;
+      if (/^length|^len\b|size\s*x/i.test(s)) hasLen = true;
+      if (/^width|^wid\b|size\s*y/i.test(s)) hasWid = true;
+      if (/^thk|thick/i.test(s)) hasThk = true;
+      if (/^qty|quantity|q\.?ty|nos|pcs/i.test(s)) hasQty = true;
+      if (/^material|^mat\b|^grade\b/i.test(s)) hasMat = true;
+      if (/^desc|description|profile/i.test(s)) hasDesc = true;
     });
-    if (matches > maxHeaderMatches) {
-      maxHeaderMatches = matches;
+
+    let score = 0;
+    if (hasPart) score += 12;
+    if (hasLen && hasWid) score += 10;
+    else if (hasLen || hasWid) score += 5;
+    if (hasThk) score += 6;
+    if (hasQty) score += 6;
+    if (hasMat) score += 4;
+    if (hasDesc) score += 8;
+
+    const prevRowStr = (matrix[r - 1] || []).join(" ").toLowerCase();
+    if (prevRowStr.includes("parts")) score += 15;
+    if (prevRowStr.includes("subnests")) score -= 5;
+
+    if (score > maxScore) {
+      maxScore = score;
       bestHeaderIdx = r;
     }
   }
 
-  const hasRecognizedHeaders = maxHeaderMatches >= 2;
+  const hasRecognizedHeaders = maxScore >= 10;
   const headerRow: string[] = hasRecognizedHeaders
     ? (matrix[bestHeaderIdx] || []).map((c) => String(c).trim())
     : [];
-  const dataRowsMatrix = hasRecognizedHeaders
-    ? matrix.slice(bestHeaderIdx + 1)
-    : matrix;
+
+  // Slice data rows below header, stopping if multiple blank lines or next table starts
+  const rawDataSlice = hasRecognizedHeaders ? matrix.slice(bestHeaderIdx + 1) : matrix;
+  const dataRowsMatrix: any[][] = [];
+  let consecutiveEmpty = 0;
+
+  for (const r of rawDataSlice) {
+    if (!r || r.every((c: any) => c === "" || c === undefined || c === null)) {
+      consecutiveEmpty++;
+      if (consecutiveEmpty >= 2 && dataRowsMatrix.length > 0) {
+        break; // End of current section table
+      }
+      continue;
+    }
+    consecutiveEmpty = 0;
+    dataRowsMatrix.push(r);
+  }
 
   if (dataRowsMatrix.length === 0) {
     throw new Error("No data rows found below sheet headers.");
@@ -211,6 +314,9 @@ export function parseMatrixToParts(matrix: any[][]): {
   };
 
   const itemIdx = findKeyIndex([
+    /^part\s*file(?:\s*name)?$/i,
+    /^part\s*name$/i,
+    /^component(?:\s*name)?$/i,
     /^pos(?:\.|\b)/i,
     /^item\s*mark$/i,
     /^part\s*mark$/i,
@@ -267,7 +373,7 @@ export function parseMatrixToParts(matrix: any[][]): {
   ]);
 
   const rawThkIdx = findKeyIndex([
-    /^(?:thk|thick|thickness)$/i,
+    /^(?:thk|thick|thickness)(?:\.|\b)/i,
     /thk\(mm\)/i,
     /thick\(mm\)/i,
     /^t$/i,
@@ -287,6 +393,8 @@ export function parseMatrixToParts(matrix: any[][]): {
 
   const lenIdx = findKeyIndex([
     /^(?:cut\s*)?len(?:gth)?(?:\s*\(mm\))?$/i,
+    /^size\s*x(?:\s*\(mm\))?$/i,
+    /^dim\s*x$/i,
     /cut\s*len/i,
     /^len$/i,
     /^length$/i,
@@ -299,7 +407,9 @@ export function parseMatrixToParts(matrix: any[][]): {
   ]);
 
   const rawWidIdx = findKeyIndex([
-    /^(?:wid|width|breadth)$/i,
+    /^(?:wid|width|breadth)(?:\s*\(mm\))?$/i,
+    /^size\s*y(?:\s*\(mm\))?$/i,
+    /^dim\s*y$/i,
     /width\(mm\)/i,
     /wid\(mm\)/i,
     /^w$/i,
@@ -318,14 +428,13 @@ export function parseMatrixToParts(matrix: any[][]): {
     /total\s*quantity/i,
     /net\s*qty/i,
     /final\s*qty/i,
-    /^q\.?ty$/i,
-    /q\.?ty/i,
-    /^qty$/i,
     /^quantity$/i,
+    /^q\.?ty\.?$/i,
+    /^qty\.?$/i,
     /^nos$/i,
     /^pcs$/i,
-    /qty/i,
     /quantity/i,
+    /qty/i,
     /nos/i,
     /pcs/i,
     /count/i,
@@ -382,10 +491,12 @@ export function parseMatrixToParts(matrix: any[][]): {
     if (effItemIdx !== -1 && rowCells[effItemIdx] !== undefined) {
       const cellVal = String(rowCells[effItemIdx]).trim();
       if (cellVal) {
+        // Strip CAD file extensions (.dft, .dwg, .dxf, .step, .stp, etc.)
+        const noExt = cellVal.replace(/\.(?:dft|dwg|dxf|step|stp|ipt|iam|sldprt|sldasm)$/i, "");
         // Clean drawing mark references like "(B13 x 2)" or "(B4 x 3, B5 x 1)" or "(WR1 x 1)"
-        const parts = cellVal.replace(/[()]/g, "").split(/[xX×,]/);
+        const parts = noExt.replace(/[()]/g, "").split(/[xX×,]/);
         const drgClean = (parts[0] ?? "").trim();
-        rawItem = drgClean || cellVal;
+        rawItem = drgClean || noExt;
       }
     }
 
@@ -606,8 +717,11 @@ export function parseMatrixToParts(matrix: any[][]): {
 
     // 6. VALIDATION RULES
     let rejectionReason: string | null = null;
+    const hasDimensions =
+      foundDimInDesc ||
+      (length !== null && width !== null && length > 0 && width > 0);
 
-    if (!foundDimInDesc || length === null || width === null || length <= 0 || width <= 0) {
+    if (!hasDimensions || length === null || width === null || length <= 0 || width <= 0) {
       rejectionReason = "Missing plate dimensions (L x W) in description or columns";
     } else if (length > 25000) {
       rejectionReason = `Length (${length.toLocaleString()} mm) exceeds maximum processing limit (25,000 mm)`;

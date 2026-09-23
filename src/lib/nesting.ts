@@ -676,7 +676,7 @@ export function resolveSheetDimensionsForPart(
     // 1c. Priority 3: User defined stock sizes in the table, so optimize strictly as per user's stock size!
     // Never fall back to 6300x1500 default when user provided stock sizes
     const fallbackRule = customRules[0]!;
-    const w = Number(fallbackRule.sheetWidth) || 2000;
+    const w = Number(fallbackRule.sheetWidth) || 1500;
     const l = Number(fallbackRule.sheetLength) || 6000;
     return {
       sheetLength: l,
@@ -689,7 +689,7 @@ export function resolveSheetDimensionsForPart(
 
   // 2. If no custom stock sheets exist at all, use config.sheetWidth & config.sheetLength
   const fallbackL = config.sheetLength || 6000;
-  const fallbackW = config.sheetWidth || 2000;
+  const fallbackW = config.sheetWidth || 1500;
   return {
     sheetLength: fallbackL,
     sheetWidth: fallbackW,
@@ -706,7 +706,7 @@ export function resolveSheetDimensionsForPart(
 export function analyzeBOMCharacteristics(
   parts: Part[],
   sheetLength: number = 6000,
-  sheetWidth: number = 2000
+  sheetWidth: number = 1500
 ): BOMAnalysis {
   const validParts = parts.filter((p) => !p.invalid);
   if (validParts.length === 0) {
