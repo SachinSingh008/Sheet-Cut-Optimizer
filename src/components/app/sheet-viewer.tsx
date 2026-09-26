@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { ZoomIn, ZoomOut, RotateCw, Maximize2, Move, Info, Layers, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { NestedSheet, PlacedPart } from "@/lib/nesting";
+import { type NestedSheet, type PlacedPart, computeSheetUtilizedDimensions } from "@/lib/nesting";
 
 const PALETTE = [
   "var(--chart-1)",
@@ -20,6 +20,8 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<PlacedPart | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+
+  const utilized = useMemo(() => computeSheetUtilizedDimensions(sheet, 5), [sheet]);
 
   const colorFor = useMemo(() => {
     const map = new Map<string, string>();
@@ -62,11 +64,17 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
             Sheet {sheet.id} · {sheet.material} · PL {sheet.thickness}mm THK
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 px-3 py-1 text-xs font-bold font-mono">
+            Req Cut: {utilized.requiredCutSizeStr}
+          </span>
+          <span className="rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-3 py-1 text-xs font-bold font-mono">
+            Remnant: {utilized.primaryRemnant.formatted}
+          </span>
           <span className="rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-3 py-1 text-xs font-extrabold font-mono">
             {sheet.utilization.toFixed(1)}% Used
           </span>
-          <span className="rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-3 py-1 text-xs font-bold font-mono">
+          <span className="rounded-full bg-muted text-muted-foreground border px-3 py-1 text-xs font-mono">
             {(100 - sheet.utilization).toFixed(1)}% Waste
           </span>
         </div>
@@ -76,7 +84,7 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
       <div className="flex flex-col xl:flex-row min-h-[500px]">
         {/* CENTER MAIN CUTOUT CANVAS */}
         <div
-          className="relative flex-1 cursor-grab overflow-hidden bg-slate-950 p-6 active:cursor-grabbing min-h-[440px] flex items-center justify-center"
+          className="relative flex-1 cursor-grab overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-6 active:cursor-grabbing min-h-[440px] flex items-center justify-center"
           onPointerDown={(e) => {
             if ((e.target as HTMLElement).closest("button")) return;
             dragRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
@@ -91,8 +99,8 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
             setHover(null);
           }}
         >
-          <div className="pointer-events-none absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-black/70 border border-white/20 px-3 py-1 text-[11px] font-mono text-slate-300 backdrop-blur-sm">
-            <Move className="size-3 text-sky-400" /> Click part to inspect · Drag to pan canvas
+          <div className="pointer-events-none absolute top-3 left-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-white/90 dark:bg-black/70 border border-slate-300 dark:border-white/20 px-3 py-1 text-[11px] font-mono text-slate-800 dark:text-slate-300 backdrop-blur-sm shadow-xs">
+            <Move className="size-3 text-sky-600 dark:text-sky-400" /> Click part to inspect · Drag to pan canvas
           </div>
 
           <div
@@ -110,7 +118,7 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
             >
               <defs>
                 <pattern id="viewer-grid" width="100" height="100" patternUnits="userSpaceOnUse">
-                  <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#334155" strokeWidth="1" strokeOpacity="0.4" />
+                  <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#64748b" strokeWidth="1" strokeOpacity="0.25" />
                 </pattern>
               </defs>
 
@@ -120,8 +128,7 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
                 y={0}
                 width={sheet.sheetLength}
                 height={sheet.sheetWidth}
-                fill="#1e293b"
-                stroke="#475569"
+                className="fill-slate-200 dark:fill-slate-800 stroke-slate-400 dark:stroke-slate-600"
                 strokeWidth={6}
               />
               <rect
@@ -131,6 +138,34 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
                 height={sheet.sheetWidth}
                 fill="url(#viewer-grid)"
               />
+
+              {/* Active Utilized / Required Cut Bounding Box */}
+              {sheet.placed.length > 0 ? (
+                <g pointerEvents="none">
+                  <rect
+                    x={0}
+                    y={0}
+                    width={Math.min(utilized.usedLength, sheet.sheetLength)}
+                    height={Math.min(utilized.usedWidth, sheet.sheetWidth)}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeWidth={4}
+                    strokeDasharray="12 8"
+                  />
+                  {sheet.sheetLength - utilized.usedLength > 15 ? (
+                    <rect
+                      x={utilized.usedLength}
+                      y={0}
+                      width={sheet.sheetLength - utilized.usedLength}
+                      height={sheet.sheetWidth}
+                      fill="rgba(245, 158, 11, 0.08)"
+                      stroke="#f59e0b"
+                      strokeWidth={2}
+                      strokeDasharray="6 6"
+                    />
+                  ) : null}
+                </g>
+              ) : null}
 
               {sheet.placed.map((p, i) => {
                 const isSel = selected === p.key;
@@ -159,20 +194,41 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
                         setSelected(isSel ? null : p.key);
                       }}
                     />
-                    {p.w > 120 && p.h > 60 ? (
-                      <text
-                        x={p.x + p.w / 2}
-                        y={p.y + p.h / 2}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fill="#ffffff"
-                        fontSize={Math.max(12, Math.min(p.w / 8, p.h / 4, 32))}
-                        fontWeight="900"
-                        fontFamily="sans-serif"
-                        className="pointer-events-none"
-                      >
-                        {p.part.item}
-                      </text>
+                    {p.w >= 30 && p.h >= 16 ? (
+                      <g className="pointer-events-none">
+                        <text
+                          x={p.x + p.w / 2}
+                          y={p.y + p.h / 2 - (p.h >= 45 && p.w >= 60 ? 6 : 0)}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#ffffff"
+                          fontSize={Math.max(9, Math.min(p.w / (Math.max(p.part.item.length, 3) * 0.65), p.h / 2.2, 26))}
+                          fontWeight="900"
+                          fontFamily="sans-serif"
+                          stroke="#000000"
+                          strokeWidth={1.5}
+                          paintOrder="stroke fill"
+                        >
+                          {p.part.item}
+                        </text>
+                        {p.h >= 45 && p.w >= 60 ? (
+                          <text
+                            x={p.x + p.w / 2}
+                            y={p.y + p.h / 2 + 8}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fill="#cbd5e1"
+                            fontSize={Math.max(8, Math.min(p.w / 10, p.h / 4.5, 14))}
+                            fontWeight="700"
+                            fontFamily="sans-serif"
+                            stroke="#000000"
+                            strokeWidth={1}
+                            paintOrder="stroke fill"
+                          >
+                            {p.w}×{p.h}
+                          </text>
+                        ) : null}
+                      </g>
                     ) : null}
                   </g>
                 );
@@ -193,7 +249,11 @@ export function SheetViewer({ sheet }: { sheet: NestedSheet }) {
             </div>
             <dl className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs font-mono">
               <dt className="text-muted-foreground font-sans">Stock Size</dt>
-              <dd className="font-bold text-right text-foreground">{sheet.sheetLength} × {sheet.sheetWidth}mm</dd>
+              <dd className="font-bold text-right text-foreground">{sheet.sheetLength} × {sheet.sheetWidth} mm</dd>
+              <dt className="text-sky-600 dark:text-sky-400 font-sans font-semibold">Required Cut</dt>
+              <dd className="font-bold text-right text-sky-600 dark:text-sky-400 font-mono">{utilized.requiredCutSizeStr}</dd>
+              <dt className="text-amber-600 dark:text-amber-400 font-sans font-semibold">Remnant Offcut</dt>
+              <dd className="font-bold text-right text-amber-600 dark:text-amber-400 font-mono">{utilized.primaryRemnant.formatted}</dd>
               <dt className="text-muted-foreground font-sans">Material</dt>
               <dd className="font-bold text-right text-foreground">{sheet.material}</dd>
               <dt className="text-muted-foreground font-sans">Thickness</dt>
@@ -333,6 +393,8 @@ export function SheetThumbnail({
   active: boolean;
   onClick: () => void;
 }) {
+  const utilized = useMemo(() => computeSheetUtilizedDimensions(sheet, 5), [sheet]);
+
   return (
     <button
       onClick={onClick}
@@ -376,6 +438,9 @@ export function SheetThumbnail({
         </div>
         <p className="text-xs text-muted-foreground truncate mt-0.5">
           {sheet.material} · {sheet.thickness}mm · {sheet.placed.length} parts
+        </p>
+        <p className="text-[11px] font-mono font-medium text-sky-600 dark:text-sky-400 truncate mt-0.5">
+          Req: {utilized.requiredCutSizeStr}
         </p>
       </div>
     </button>

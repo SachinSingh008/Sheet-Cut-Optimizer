@@ -210,7 +210,7 @@ function ThicknessPage() {
                     Normal Mild Steel Plates Section (IS 2062 Standard Mill Stock)
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    Allocated to standard HR mill stock sheets (e.g. 6300 × 1500 mm)
+                    Allocated to configured available stock sheets (e.g. 2000 × 6000 mm)
                   </p>
                 </div>
               </div>

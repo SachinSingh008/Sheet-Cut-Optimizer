@@ -24,6 +24,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { store, useAppState } from "@/lib/store";
 import { groupByThickness, MATERIAL_RATE, partWeight } from "@/lib/mock-data";
 import { generateCuttingSequence } from "@/lib/cutting-sequence";
+import { computeSheetUtilizedDimensions } from "@/lib/nesting";
+import { ThicknessLengthSummaryTable } from "@/components/app/thickness-length-summary-table";
 
 export const Route = createFileRoute("/_app/reports")({
   head: () => ({
@@ -46,7 +48,7 @@ export const Route = createFileRoute("/_app/reports")({
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 function ReportsPage() {
-  const { parts, result } = useAppState();
+  const { parts, result, file } = useAppState();
   const [showPdfModal, setShowPdfModal] = useState(false);
 
   const materialData = useMemo(() => {
@@ -125,8 +127,8 @@ function ReportsPage() {
 
       <PageHeader
         eyebrow="STEP 5"
-        title="Reports & Exports"
-        description="Shop-floor ready documentation: material summary, scrap analysis and printable PDF cut list."
+        title={file?.name ? `Reports & Exports — ${file.name}` : "Reports & Exports"}
+        description={`${file?.name ? `${file.name} · ` : ""}Shop-floor ready documentation: material summary, scrap analysis and printable PDF cut list.`}
         actions={
           <>
             <Button variant="outline" onClick={() => download("Excel")}>
@@ -143,6 +145,17 @@ function ReportsPage() {
           </>
         }
       />
+
+      {result && result.sheets.length > 0 && (
+        <div className="mb-6">
+          <ThicknessLengthSummaryTable
+            sheets={result.sheets}
+            kerf={result.config.kerf}
+            title="Executive Plate Cut Length & Procurement Summary"
+            subtitle="Individual required sheet cut lengths and combined linear totals grouped by thickness"
+          />
+        </div>
+      )}
 
       <Tabs defaultValue="summary">
         <TabsList className="mb-6 flex-wrap">
@@ -227,15 +240,32 @@ function ReportsPage() {
         <TabsContent value="scrap">
           {result ? (
             <ReportTable
-              headers={["Sheet", "Material", "Thickness", "Parts", "Utilization", "Scrap"]}
-              rows={result.sheets.map((s) => [
-                s.id,
-                s.material,
-                `PL ${s.thickness} THK`,
-                `${s.placed.length}`,
-                `${s.utilization.toFixed(1)}%`,
-                `${(100 - s.utilization).toFixed(1)}%`,
-              ])}
+              headers={[
+                "Sheet",
+                "Material",
+                "Thickness",
+                "Parts",
+                "Stock Plate Size",
+                "Required Cut Size",
+                "Remaining Remnant",
+                "Utilization",
+                "Scrap",
+              ]}
+              rows={result.sheets.map((s) => {
+                const kerf = result.config?.kerf ?? 5;
+                const u = computeSheetUtilizedDimensions(s, kerf);
+                return [
+                  s.id,
+                  s.material,
+                  `PL ${s.thickness} THK`,
+                  `${s.placed.length}`,
+                  `${s.sheetLength.toLocaleString()} × ${s.sheetWidth.toLocaleString()} mm`,
+                  u.requiredCutSizeStr,
+                  u.primaryRemnant.formatted,
+                  `${s.utilization.toFixed(1)}%`,
+                  `${(100 - s.utilization).toFixed(1)}%`,
+                ];
+              })}
             />
           ) : (
             <EmptyState title="No scrap data" description="Run the optimizer first." />

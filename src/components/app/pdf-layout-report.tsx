@@ -1,8 +1,10 @@
 import React, { useRef, useState } from "react";
 import { Printer, ArrowLeft, ZoomIn, ZoomOut, Type, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { OptimizationResult, NestedSheet } from "@/lib/nesting";
+import { computeSheetUtilizedDimensions, type OptimizationResult, type NestedSheet } from "@/lib/nesting";
 import { generateCuttingSequence } from "@/lib/cutting-sequence";
+import { useAppState } from "@/lib/store";
+import { ThicknessLengthSummaryTable } from "@/components/app/thickness-length-summary-table";
 
 interface PdfLayoutReportProps {
   result: OptimizationResult;
@@ -10,6 +12,7 @@ interface PdfLayoutReportProps {
 }
 
 export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
+  const { file } = useAppState();
   const reportRef = useRef<HTMLDivElement>(null);
   const [pdfTextScale, setPdfTextScale] = useState<number>(1.2); // Default text scale
   const [orientation, setOrientation] = useState<"standing" | "sleeping">("standing"); // Standing vertical by default
@@ -106,10 +109,10 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
           )}
           <div>
             <h2 className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
-              <span>Cut List Optimizer PDF Fabrication Report</span>
+              <span>Cut List Optimizer PDF Report {file?.name ? `— ${file.name}` : ""}</span>
             </h2>
             <p className="text-[11px] text-slate-400 hidden sm:block">
-              Standing vertical plate drawings (1250×6000mm) · Maximum drawing area & legibility
+              {file?.name ? `Source: ${file.name} · ` : ""}Standing vertical plate drawings (1250×6000mm) · Maximum drawing area & legibility
             </p>
           </div>
         </div>
@@ -201,9 +204,16 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
           {/* Cover Header */}
           <div className="border-b-2 border-slate-900 pb-3 mb-4">
             <div className="flex items-center justify-between mb-2">
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-                SteelNest AI — Industrial Fabrication Cut List Report
-              </h1>
+              <div>
+                <h1 className="text-lg font-bold text-slate-900 tracking-tight">
+                  SteelNest AI — Industrial Fabrication Cut List Report
+                </h1>
+                {file?.name ? (
+                  <p className="text-xs font-semibold text-slate-600 mt-0.5">
+                    Source Document / Model: <span className="font-mono text-slate-900 font-bold">{file.name}</span> ({result.sheets.length} Sheets Nested)
+                  </p>
+                ) : null}
+              </div>
               <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 Powered by 1810 Systems
               </span>
@@ -251,6 +261,18 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Executive Cut Length & Procurement Summary Table on Top */}
+          <div className="mb-5 print:mb-4 print:break-inside-avoid">
+            <ThicknessLengthSummaryTable
+              sheets={result.sheets}
+              kerf={result.config.kerf}
+              isPrintMode={true}
+              title="Executive Plate Cut Length & Procurement Summary"
+              subtitle="Required stock plate quantities and exact cut lengths needed grouped by thickness"
+              className="border-slate-800 bg-slate-50/50 print:bg-white print:border-slate-900 shadow-none rounded-xl"
+            />
           </div>
 
           {/* Grouped Sheets Section */}
@@ -305,11 +327,19 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
 
                     // Compute dimensions based on Standing (vertical) vs Sleeping (horizontal) orientation
                     const isStanding = orientation === "standing";
+                    const utilized = computeSheetUtilizedDimensions(sheet, result.config.kerf);
                     
                     // Standing mode: X = Sheet Width (1250), Y = Sheet Length (6000)
                     // Sleeping mode: X = Sheet Length (6000), Y = Sheet Width (1250)
                     const svgW = isStanding ? sheet.sheetWidth : sheet.sheetLength;
                     const svgH = isStanding ? sheet.sheetLength : sheet.sheetWidth;
+
+                    const reqW = isStanding ? utilized.usedWidth : utilized.usedLength;
+                    const reqH = isStanding ? utilized.usedLength : utilized.usedWidth;
+                    const remX = isStanding ? 0 : utilized.usedLength;
+                    const remY = isStanding ? utilized.usedLength : 0;
+                    const remW = isStanding ? svgW : Math.max(0, svgW - utilized.usedLength);
+                    const remH = isStanding ? Math.max(0, svgH - utilized.usedLength) : svgH;
 
                     return (
                       <div
@@ -317,13 +347,23 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                         className="border border-slate-400 rounded bg-white p-3 space-y-2 shadow-xs print:break-inside-avoid"
                       >
                         {/* Sheet Title Bar */}
-                        <div className="flex items-center justify-between border-b border-slate-300 pb-1.5 bg-slate-100 -mx-3 -mt-3 p-2.5 rounded-t font-mono">
-                          <span className="font-bold text-xs text-slate-900">
-                            Sheet {sheet.id} ({sheet.sheetLength}×{sheet.sheetWidth} - {group.isChq ? "CHQ" : "MS"})
-                          </span>
-                          <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-1.5 py-0.5 rounded">
-                            {sheetUtil.toFixed(1)}% Yield
-                          </span>
+                        <div className="flex flex-wrap items-center justify-between border-b border-slate-300 pb-1.5 bg-slate-100 -mx-3 -mt-3 p-2.5 rounded-t font-mono gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-xs text-slate-900">
+                              Sheet {sheet.id} ({sheet.sheetLength}×{sheet.sheetWidth} - {group.isChq ? "CHQ" : "MS"})
+                            </span>
+                            <span className="text-[10px] font-extrabold text-blue-950 bg-blue-100 border border-blue-300 px-2 py-0.5 rounded shadow-2xs">
+                              Required Cut Size: {utilized.requiredCutSizeStr}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[9.5px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
+                              Remnant: {utilized.primaryRemnant.formatted}
+                            </span>
+                            <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-300 px-1.5 py-0.5 rounded">
+                              {sheetUtil.toFixed(1)}% Yield
+                            </span>
+                          </div>
                         </div>
 
                         {/* TABLE ON LEFT, DIAGRAM ON RIGHT */}
@@ -339,6 +379,18 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 font-mono">
+                                <tr className="bg-blue-50/80">
+                                  <td className="px-1.5 py-0.5 text-blue-950 font-bold">Required Plate</td>
+                                  <td className="px-1.5 py-0.5 text-right font-extrabold text-blue-900 text-[10.5px]">
+                                    {utilized.requiredCutSizeStr}
+                                  </td>
+                                </tr>
+                                <tr className="bg-amber-50/70">
+                                  <td className="px-1.5 py-0.5 text-amber-950 font-semibold">Remaining Remnant</td>
+                                  <td className="px-1.5 py-0.5 text-right font-bold text-amber-800 text-[10px]">
+                                    {utilized.primaryRemnant.formatted}
+                                  </td>
+                                </tr>
                                 <tr>
                                   <td className="px-1.5 py-0.5 text-slate-600 font-medium">Used Yield</td>
                                   <td className="px-1.5 py-0.5 text-right font-bold text-emerald-700">
@@ -403,6 +455,68 @@ export function PdfLayoutReport({ result, onClose }: PdfLayoutReportProps) {
                                   stroke="#0f172a"
                                   strokeWidth={3}
                                 />
+
+                                {/* Remaining Remnant Offcut Zone */}
+                                {remW > 15 && remH > 15 && (
+                                  <g>
+                                    <rect
+                                      x={remX}
+                                      y={remY}
+                                      width={remW}
+                                      height={remH}
+                                      fill="rgba(245, 158, 11, 0.08)"
+                                      stroke="#b45309"
+                                      strokeWidth={2}
+                                      strokeDasharray="6 4"
+                                    />
+                                    <text
+                                      x={remX + remW / 2}
+                                      y={remY + remH / 2}
+                                      textAnchor="middle"
+                                      dominantBaseline="central"
+                                      fill="#b45309"
+                                      fontSize={(isStanding ? 28 : 20) * pdfTextScale}
+                                      fontWeight="bold"
+                                      fontFamily="sans-serif"
+                                    >
+                                      REMAINING REMNANT ({utilized.primaryRemnant.formatted})
+                                    </text>
+                                  </g>
+                                )}
+
+                                {/* Required Cut Bounding Box (Only how much part is used with kerf) */}
+                                {reqW > 0 && reqH > 0 && (
+                                  <g>
+                                    <rect
+                                      x={0}
+                                      y={0}
+                                      width={reqW}
+                                      height={reqH}
+                                      fill="none"
+                                      stroke="#0284c7"
+                                      strokeWidth={2.5}
+                                      strokeDasharray="8 5"
+                                    />
+                                    <rect
+                                      x={2}
+                                      y={2}
+                                      width={Math.min(reqW - 4, (isStanding ? 220 : 170) * pdfTextScale)}
+                                      height={(isStanding ? 24 : 18) * pdfTextScale}
+                                      fill="#0284c7"
+                                      rx={3}
+                                    />
+                                    <text
+                                      x={6}
+                                      y={(isStanding ? 17 : 13) * pdfTextScale}
+                                      fill="#ffffff"
+                                      fontSize={(isStanding ? 12 : 10) * pdfTextScale}
+                                      fontWeight="extrabold"
+                                      fontFamily="sans-serif"
+                                    >
+                                      REQUIRED CUT: {utilized.requiredCutSizeStr}
+                                    </text>
+                                  </g>
+                                )}
 
                                 {/* Top/Horizontal Dimension Line (Width if standing, Length if sleeping) */}
                                 <line

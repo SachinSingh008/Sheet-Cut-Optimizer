@@ -18,6 +18,7 @@ import {
   Scissors,
   Plus,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader, PageTransition, EmptyState } from "@/components/app/page-header";
@@ -47,6 +48,7 @@ import { PlateCutDiagramSection } from "@/components/app/plate-cut-diagram";
 import { PlateTypeInventorySection } from "@/components/app/plate-type-inventory";
 import { PdfLayoutReport } from "@/components/app/pdf-layout-report";
 import { EditableBomTable } from "@/components/app/editable-bom-table";
+import { OptimizationTimerModal } from "@/components/app/optimization-timer-modal";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/parse")({
@@ -70,13 +72,14 @@ export const Route = createFileRoute("/_app/parse")({
 type SortKey = "item" | "material" | "thickness" | "length" | "width" | "qty" | "weight";
 
 function ParsePage() {
-  const { parts, rejectedParts, result, config } = useAppState();
+  const { file, parts, rejectedParts, result, config, isOptimizing, progress } = useAppState();
   const [query, setQuery] = useState("");
   const [material, setMaterial] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "item", dir: 1 });
   const [editing, setEditing] = useState<Part | null>(null);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showEditTable, setShowEditTable] = useState(false);
+  const [showTimerModal, setShowTimerModal] = useState(false);
 
   // Restore Modal State
   const [restoringRejected, setRestoringRejected] = useState<RejectedPart | null>(null);
@@ -154,11 +157,20 @@ function ParsePage() {
       {showPdfModal && result && (
         <PdfLayoutReport result={result} onClose={() => setShowPdfModal(false)} />
       )}
+      <OptimizationTimerModal
+        isOpen={showTimerModal}
+        onClose={() => setShowTimerModal(false)}
+        targetRoute="/layouts"
+      />
 
       <PageHeader
         eyebrow="STEP 2"
-        title="Parse Results"
-        description="Validated BOM line items with interactive plate cut diagrams and cutting instructions."
+        title={file?.name ? `Parse Results — ${file.name}` : "Parse Results"}
+        description={
+          file?.name
+            ? `Extracted ${parts.length} line items from ${file.name}. Interactive plate cut diagrams and cutting sequence ready.`
+            : "Validated BOM line items with interactive plate cut diagrams and cutting instructions."
+        }
         actions={
           <div className="flex items-center gap-3">
             {result && (
@@ -170,10 +182,21 @@ function ParsePage() {
                 <FileText className="mr-1.5 size-4" /> Download / Export PDF
               </Button>
             )}
-            <Button asChild size="lg" variant="outline">
-              <Link to="/layouts">
-                View Cut Layouts <ArrowRight className="ml-1.5 size-4" />
-              </Link>
+            <Button
+              size="lg"
+              onClick={() => setShowTimerModal(true)}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold shadow-soft gap-2"
+            >
+              {isOptimizing ? (
+                <>
+                  <Sparkles className="size-4 animate-spin" /> Optimizing ({progress}%)...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="size-4 text-amber-300" />
+                  Proceed After Verification (15s Multi-Algo) <ArrowRight className="size-4" />
+                </>
+              )}
             </Button>
           </div>
         }
@@ -231,31 +254,43 @@ function ParsePage() {
             </div>
           </div>
 
-          <label className="flex items-center gap-3 cursor-pointer bg-white dark:bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:border-slate-400 shadow-sm transition-all select-none shrink-0">
-            <input
-              type="checkbox"
-              checked={config.groupByMaterial ?? false}
-              onChange={(e) => {
-                store.set({
-                  config: { ...config, groupByMaterial: e.target.checked },
-                });
-                toast.success(
-                  e.target.checked
-                    ? "Strategy: Nesting on SEPARATE sheets by material grade"
-                    : "Strategy: COMBINING all grades on same thickness sheet (Minimizes sheet count)"
-                );
-              }}
-              className="size-4 rounded border-slate-400 text-blue-600 focus:ring-blue-500 cursor-pointer"
-            />
-            <div className="flex flex-col">
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Consider grade of material (if any)?
-              </span>
-              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                {config.groupByMaterial ? "Yes — Separate sheets per grade" : "No — Combine all grades in same sheet"}
-              </span>
-            </div>
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-3 cursor-pointer bg-white dark:bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 hover:border-slate-400 shadow-sm transition-all select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={config.groupByMaterial ?? false}
+                onChange={(e) => {
+                  store.set({
+                    config: { ...config, groupByMaterial: e.target.checked },
+                  });
+                  toast.success(
+                    e.target.checked
+                      ? "Strategy: Nesting on SEPARATE sheets by material grade"
+                      : "Strategy: COMBINING all grades on same thickness sheet (Minimizes sheet count)"
+                  );
+                }}
+                className="size-4 rounded border-slate-400 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <div className="flex flex-col">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Consider grade of material (if any)?
+                </span>
+                <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  {config.groupByMaterial ? "Yes — Separate sheets per grade" : "No — Combine all grades in same sheet"}
+                </span>
+              </div>
+            </label>
+
+            <Button
+              onClick={() => setShowTimerModal(true)}
+              size="lg"
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold shadow-soft gap-2 shrink-0"
+            >
+              <Sparkles className="size-4 text-amber-300" />
+              <span>Proceed to 15s Optimization</span>
+              <ArrowRight className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -471,13 +506,14 @@ function ParsePage() {
                               size="sm"
                               className="h-7 text-[11px] bg-primary text-primary-foreground hover:bg-primary/90 font-semibold gap-1"
                               onClick={() => {
-                                store.splitOversizedPart(r.id, 6300);
+                                const segLen = config.sheetLength || 6000;
+                                store.splitOversizedPart(r.id, segLen);
                                 toast.success("Auto-Split Applied!", {
-                                  description: `Split ${r.item} into 6,300mm standard stock segments and moved to nesting.`,
+                                  description: `Split ${r.item} into ${segLen}mm standard stock segments and moved to nesting.`,
                                 });
                               }}
                             >
-                              <Scissors className="size-3" /> Auto-Split (6.3m)
+                              <Scissors className="size-3" /> Auto-Split ({((config.sheetLength || 6000) / 1000).toFixed(1)}m)
                             </Button>
                           ) : null}
 
