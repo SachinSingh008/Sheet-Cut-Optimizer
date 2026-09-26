@@ -214,7 +214,14 @@ export async function parseExcelFile(file: File): Promise<{
   }
 
   // Fallback to first sheet
-  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    throw new Error("No sheets found in workbook.");
+  }
+  const firstSheet = workbook.Sheets[firstSheetName];
+  if (!firstSheet) {
+    throw new Error("No data found in first sheet of the uploaded file.");
+  }
   const m: any[][] = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
   if (!m || m.length === 0) {
     throw new Error("No data found in any sheet of the uploaded file.");

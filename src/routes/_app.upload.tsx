@@ -38,7 +38,6 @@ import {
 import { store, useAppState } from "@/lib/store";
 import { parseExcelFile, type RejectedPart } from "@/lib/excel-parser";
 import { processDocumentOcr, type OcrProgress } from "@/lib/ocr-parser";
-import { EditableBomTable } from "@/components/app/editable-bom-table";
 import { ExcelWorkbook } from "@/components/app/excel-workbook";
 import { OptimizationTimerModal } from "@/components/app/optimization-timer-modal";
 import { partWeight, type Part } from "@/lib/mock-data";
@@ -81,7 +80,6 @@ function UploadPage() {
   const [dragging, setDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
-  const [showEditTable, setShowEditTable] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
   const [showTimerModal, setShowTimerModal] = useState(false);
@@ -226,72 +224,81 @@ function UploadPage() {
         description="Copy & paste directly into the interactive Excel workbook, drag to auto-fill values, or drop your Excel (.xlsx, .csv) / PDF & Image blueprint below."
       />
 
-      {/* Interactive Excel Workbook with Direct Paste & Drag-to-Fill */}
-      <ExcelWorkbook
-        onApplied={() => {
-          setShowVerifyModal(true);
-        }}
-      />
-
-      {/* Or Upload Drop Zone Divider */}
-      <div className="relative my-8 text-center">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t-2 border-dashed border-border" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-4 font-bold tracking-wider text-muted-foreground flex items-center gap-2">
-            <span>OR UPLOAD BILL OF MATERIALS FILE / OCR BLUEPRINT</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Upload Drop Zone */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          processSelectedFile(e.dataTransfer.files?.[0]);
-        }}
-        onClick={() => inputRef.current?.click()}
-        className={cn(
-          "relative cursor-pointer overflow-hidden rounded-3xl border-2 border-dashed bg-card px-6 py-12 text-center transition-all sm:py-16 shadow-soft",
-          dragging ? "border-primary bg-primary-soft shadow-lift" : "hover:border-primary/60 hover:bg-primary-soft/30",
-        )}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          accept=".xlsx,.xls,.csv,.jpg,.jpeg,.png,.bmp,.webp,.pdf"
-          onChange={(e) => processSelectedFile(e.target.files?.[0])}
-        />
-        <motion.div
-          animate={dragging ? { y: -8, scale: 1.06 } : { y: [0, -6, 0] }}
-          transition={dragging ? { duration: 0.2 } : { duration: 3, repeat: Infinity, ease: "easeInOut" }}
-          className="relative mx-auto grid size-16 place-items-center rounded-2xl bg-brand-gradient shadow-lift"
+      {/* Upload Drop Zone & Highlighted Upload Button at Top */}
+      <div className="relative mb-6">
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            processSelectedFile(e.dataTransfer.files?.[0]);
+          }}
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            "relative cursor-pointer overflow-hidden rounded-3xl border-2 border-dashed bg-card px-6 py-7 sm:py-8 transition-all shadow-soft group",
+            dragging
+              ? "border-primary bg-primary-soft shadow-lift"
+              : "hover:border-primary/60 hover:bg-primary-soft/30",
+          )}
         >
-          <UploadCloud className="size-8 text-primary-foreground" />
-        </motion.div>
-        <h3 className="relative mt-4 text-lg font-semibold">
-          {dragging ? "Drop your file here" : "Click to select or drag & drop Excel, Image, or PDF Drawing"}
-        </h3>
-        <p className="relative mt-1 text-xs text-muted-foreground">
-          Supports .xlsx, .xls, .csv, .jpg, .png, .webp & .pdf steel fabrication drawings & BOM blueprints
-        </p>
-        <div className="relative mt-5 flex flex-wrap justify-center gap-2">
-          {accepted.map((a) => (
-            <span
-              key={a.label}
-              className="inline-flex items-center gap-1.5 rounded-full border bg-background px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm"
-            >
-              <a.icon className="size-3.5 text-emerald-600" /> {a.label}
-            </span>
-          ))}
+          <input
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            accept=".xlsx,.xls,.csv,.jpg,.jpeg,.png,.bmp,.webp,.pdf"
+            onChange={(e) => processSelectedFile(e.target.files?.[0])}
+          />
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-5 text-left">
+            <div className="flex items-center gap-4">
+              <motion.div
+                animate={dragging ? { y: -4, scale: 1.06 } : { y: [0, -3, 0] }}
+                transition={dragging ? { duration: 0.2 } : { duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                className="grid size-14 place-items-center rounded-2xl bg-brand-gradient shadow-lift shrink-0"
+              >
+                <UploadCloud className="size-7 text-primary-foreground" />
+              </motion.div>
+              <div>
+                <h3 className="text-base sm:text-lg font-bold text-foreground group-hover:text-primary transition-colors">
+                  {dragging
+                    ? "Drop your file here to auto-populate Excel table"
+                    : "Click to select or drag & drop Excel, Image, or PDF Drawing"}
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Supports .xlsx, .xls, .csv, .jpg, .png, .webp & .pdf steel fabrication drawings & BOM blueprints
+                </p>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {accepted.map((a) => (
+                    <span
+                      key={a.label}
+                      className="inline-flex items-center gap-1.5 rounded-full border bg-background px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground shadow-xs"
+                    >
+                      <a.icon className="size-3 text-emerald-600" /> {a.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Next to this: Small highlighted upload button */}
+            <div className="shrink-0 flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  inputRef.current?.click();
+                }}
+                className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-emerald-600/30 ring-2 ring-emerald-400/50 hover:ring-emerald-300 transition-all cursor-pointer flex items-center gap-2 shrink-0 animate-pulse hover:animate-none"
+                title="Select Excel, CSV or Drawing from computer"
+              >
+                <UploadCloud className="size-4" />
+                <span>Upload File</span>
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -417,225 +424,42 @@ function UploadPage() {
         ) : null}
       </AnimatePresence>
 
-      {/* Extracted BOM Data Table & Verification View */}
+      {/* Interactive Excel Workbook with Direct Paste & Drag-to-Fill & Auto-Populate from Uploaded File */}
+      <ExcelWorkbook
+        importedParts={parts}
+        importedFileName={file?.name}
+        onApplied={() => {
+          setShowVerifyModal(true);
+        }}
+      />
+
+      {/* REJECTED / UNPARSEABLE ITEMS TABLE (Only displayed if any items were excluded) */}
       <AnimatePresence>
-        {file && (parts.length > 0 || rejectedParts.length > 0) && !parsing ? (
+        {file && rejectedParts.length > 0 && !parsing ? (
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             className="mt-6 space-y-6"
           >
-            {/* File Info Summary Header */}
-            <div className="rounded-2xl border bg-card p-6 shadow-soft">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4">
-                <div className="flex items-center gap-3">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-emerald-500/15 text-emerald-600">
-                    <CheckCircle2 className="size-6" />
-                  </span>
-                  <div>
-                    <p className="font-semibold text-foreground">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatBytes(file.size)} · {file.type.toUpperCase()} · Extracted {parts.length} Valid Items ({rejectedParts.length} Excluded)
-                    </p>
+            {/* REJECTED / UNPARSEABLE ITEMS TABLE */}
+            <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 shadow-soft space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-destructive/20 pb-4">
+                <div>
+                  <div className="flex items-center gap-2 text-destructive">
+                    <XCircle className="size-5" />
+                    <h3 className="font-bold text-base">
+                      Rejected & Excluded Line Items ({rejectedParts.length} Items Excluded)
+                    </h3>
                   </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant={showEditTable ? "secondary" : "outline"}
-                    onClick={() => setShowEditTable(!showEditTable)}
-                  >
-                    <Pencil className="mr-1.5 size-4" />
-                    {showEditTable ? "View Static Table" : "Edit BOM Table (Inline)"}
-                  </Button>
-                  <Button variant="outline" onClick={() => store.reset()}>
-                    <RotateCcw className="mr-1.5 size-4" /> Reset & Clear
-                  </Button>
-                  <Button
-                    size="lg"
-                    onClick={handleProceedNext}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-soft"
-                  >
-                    Next — Proceed to Optimization <ArrowRight className="ml-1.5 size-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Extraction Metrics */}
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4 text-xs">
-                <div className="rounded-xl border bg-muted/30 p-3">
-                  <p className="text-muted-foreground font-medium">Valid Nesting Items</p>
-                  <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">{parts.length}</p>
-                </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
-                  <p className="text-muted-foreground font-medium">Excluded / Invalid Items</p>
-                  <p className={cn("mt-1 text-lg font-bold", rejectedParts.length > 0 ? "text-amber-600 dark:text-amber-400" : "text-foreground")}>
-                    {rejectedParts.length}
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Items missing cut dimensions or exceeding maximum stock sheet limits. Use <strong>Auto-Split</strong> or <strong>Add Dimensions</strong> to restore them into nesting.
                   </p>
                 </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
-                  <p className="text-muted-foreground font-medium">Total Quantity to Cut</p>
-                  <p className="mt-1 text-lg font-bold text-primary">
-                    {parts.reduce((sum, p) => sum + p.qty, 0).toLocaleString()} pcs
-                  </p>
-                </div>
-                <div className="rounded-xl border bg-muted/30 p-3">
-                  <p className="text-muted-foreground font-medium">Estimated Net Weight</p>
-                  <p className="mt-1 text-lg font-bold text-foreground">
-                    {Math.round(parts.reduce((sum, p) => sum + partWeight(p), 0)).toLocaleString()} kg
-                  </p>
-                </div>
+
+                <span className="rounded-full bg-destructive/15 text-destructive font-bold text-xs px-3 py-1 border border-destructive/30 shrink-0">
+                  Action Required
+                </span>
               </div>
-            </div>
-
-            {/* Editable BOM Table View */}
-            {showEditTable ? (
-              <EditableBomTable
-                initialParts={parts}
-                onSave={() => setShowEditTable(false)}
-                isOcrResult={file.type === "PNG" || file.type === "JPG" || file.type === "PDF" || file.type === "OCR"}
-              />
-            ) : (
-              /* Static Extracted BOM Data Table for User Verification */
-              <div className="rounded-2xl border bg-card p-6 shadow-soft space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Table2 className="size-5 text-primary" />
-                      <h3 className="font-bold text-base text-foreground">
-                        Verify Extracted BOM Content ({parts.length} Valid Items)
-                      </h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Inspect valid plate items below. Click <strong>Edit BOM Table</strong> above to change any cell directly.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowEditTable(true)}
-                    >
-                      <Pencil className="mr-1.5 size-4" /> Edit Values
-                    </Button>
-                    <Button
-                      size="default"
-                      onClick={handleProceedNext}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shrink-0"
-                    >
-                      Next <ArrowRight className="ml-1.5 size-4" />
-                    </Button>
-                  </div>
-                </div>
-
-              {/* Extraction Disclaimer Note & Material Grade Strategy */}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-800 dark:text-amber-300">
-                  <Info className="size-4 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-bold">Verification Disclaimer Note:</p>
-                    <p className="mt-0.5 text-[11px] leading-relaxed">
-                      Automated Excel extractors can occasionally misinterpret non-standard header titles or merged cells. Please verify that <strong>Item Marks</strong>, <strong>Material Grades</strong>, <strong>Thickness (mm)</strong>, <strong>Dimensions ($L \times W$)</strong>, and <strong>Quantities</strong> match your original bill of materials carefully before proceeding.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/60 p-3.5 text-xs">
-                  <label className="flex items-start gap-3 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={config.groupByMaterial ?? false}
-                      onChange={(e) => {
-                        store.set({
-                          config: { ...config, groupByMaterial: e.target.checked },
-                        });
-                        toast.success(
-                          e.target.checked
-                            ? "Nesting strategy: Nesting on SEPARATE sheets by material grade"
-                            : "Nesting strategy: COMBINING all grades on same thickness sheet"
-                        );
-                      }}
-                      className="mt-0.5 size-4 rounded border-slate-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                    />
-                    <div className="flex flex-col">
-                      <span className="font-bold text-foreground">
-                        Consider grade of material (if any)?
-                      </span>
-                      <span className="text-[11px] text-muted-foreground leading-relaxed mt-0.5">
-                        {config.groupByMaterial
-                          ? "Yes — Separate sheets per material grade (e.g. IS:2062 vs SAILMA 350HI)."
-                          : "No — Combine all grades with identical thickness on same sheet to minimize sheet count."}
-                      </span>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {/* Extracted Valid Line Items Table */}
-              <div className="overflow-x-auto rounded-xl border">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/60 text-muted-foreground uppercase font-semibold">
-                    <tr className="border-b">
-                      <th className="px-3 py-2.5 text-left">#</th>
-                      <th className="px-3 py-2.5 text-left">Item Mark</th>
-                      <th className="px-3 py-2.5 text-left">Description</th>
-                      <th className="px-3 py-2.5 text-left">Material Grade</th>
-                      <th className="px-3 py-2.5 text-right">Thk (mm)</th>
-                      <th className="px-3 py-2.5 text-right">Length (mm)</th>
-                      <th className="px-3 py-2.5 text-right">Width (mm)</th>
-                      <th className="px-3 py-2.5 text-center font-bold">Qty</th>
-                      <th className="px-3 py-2.5 text-right">Weight (kg)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {parts.map((p, idx) => (
-                      <tr key={p.id} className="border-b hover:bg-muted/30">
-                        <td className="px-3 py-2 text-muted-foreground">{idx + 1}</td>
-                        <td className="px-3 py-2 font-mono font-bold text-foreground">{p.item}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{p.description}</td>
-                        <td className="px-3 py-2 font-medium">
-                          <span className="rounded bg-primary-soft px-1.5 py-0.5 text-primary text-[11px]">
-                            {p.material}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums font-semibold">{p.thickness}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{p.length}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{p.width}</td>
-                        <td className="px-3 py-2 text-center tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
-                          {p.qty}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums font-mono">
-                          {partWeight(p).toFixed(1)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            )}
-
-            {/* REJECTED / UNPARSEABLE ITEMS TABLE — PLACED JUST BELOW VERIFY EXTRACTED BOM CONTENT */}
-            {rejectedParts.length > 0 && (
-              <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 shadow-soft space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-destructive/20 pb-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-destructive">
-                      <XCircle className="size-5" />
-                      <h3 className="font-bold text-base">
-                        Rejected & Excluded Line Items ({rejectedParts.length} Items Excluded)
-                      </h3>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Items missing cut dimensions or exceeding maximum stock sheet limits. Use <strong>Auto-Split</strong> or <strong>Add Dimensions</strong> to restore them into nesting.
-                    </p>
-                  </div>
-
-                  <span className="rounded-full bg-destructive/15 text-destructive font-bold text-xs px-3 py-1 border border-destructive/30 shrink-0">
-                    Action Required
-                  </span>
-                </div>
 
                 <div className="overflow-x-auto rounded-xl border border-destructive/20 bg-card">
                   <table className="w-full text-xs">
@@ -736,7 +560,6 @@ function UploadPage() {
                   </table>
                 </div>
               </div>
-            )}
 
             {/* Bottom Action Row */}
             <div className="flex justify-end pt-2">

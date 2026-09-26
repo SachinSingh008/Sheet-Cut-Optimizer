@@ -15,6 +15,9 @@ import {
   Layers,
   ChevronLeft,
   ChevronRight,
+  Undo2,
+  Redo2,
+  Eraser,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
@@ -326,8 +329,8 @@ export function ExcelWorkbook({
   importedFileName,
 }: {
   onApplied?: () => void;
-  importedParts?: Part[];
-  importedFileName?: string;
+  importedParts?: Part[] | undefined;
+  importedFileName?: string | undefined;
 }) {
   // Columns State — starts completely BLANK at start (titles and fields empty)
   const [columns, setColumns] = useState<WorkbookColumn[]>(() => createBlankColumns(7));
@@ -337,9 +340,9 @@ export function ExcelWorkbook({
     createBlankRows(INITIAL_ROW_COUNT, 7),
   );
 
-  // Undo / Redo History
-  const [history, setHistory] = useState<string[][][]>([]);
-  const [historyIdx, setHistoryIdx] = useState<number>(-1);
+  // Undo / Redo History — initialized with initial grid at index 0 so first edits can be undone
+  const [history, setHistory] = useState<string[][][]>(() => [createBlankRows(INITIAL_ROW_COUNT, 7)]);
+  const [historyIdx, setHistoryIdx] = useState<number>(0);
 
   // Selection state
   const [selectedCell, setSelectedCell] = useState<{ r: number; c: number }>({ r: 0, c: 0 });
@@ -393,9 +396,10 @@ export function ExcelWorkbook({
     (newGrid: string[][]) => {
       setHistory((prev) => {
         const sliced = prev.slice(0, historyIdx + 1);
+        if (sliced.length > 50) sliced.shift();
         return [...sliced, newGrid];
       });
-      setHistoryIdx((prev) => prev + 1);
+      setHistoryIdx((prev) => Math.min(prev + 1, 50));
       setGrid(newGrid);
     },
     [historyIdx],
@@ -428,7 +432,9 @@ export function ExcelWorkbook({
       ]);
 
       setColumns(sampleCols);
-      commitToHistory(newGrid);
+      setGrid(newGrid);
+      setHistory([newGrid]);
+      setHistoryIdx(0);
       setSelectedCell({ r: 0, c: 0 });
       setSelectionRange({ startR: 0, startC: 0, endR: Math.max(0, newGrid.length - 1), endC: 6 });
       toast.success(`Loaded ${importedParts.length} parts into Excel Workbook!`, {
@@ -437,27 +443,33 @@ export function ExcelWorkbook({
           : "All columns mapped and ready for editing or optimization.",
       });
     }
-  }, [importedParts, importedFileName, commitToHistory]);
+  }, [importedParts, importedFileName]);
 
   const handleUndo = useCallback(() => {
     if (historyIdx > 0) {
-      const prevGrid = history[historyIdx - 1];
+      const targetIdx = historyIdx - 1;
+      const prevGrid = history[targetIdx];
       if (prevGrid) {
-        setHistoryIdx((prev) => prev - 1);
+        setHistoryIdx(targetIdx);
         setGrid(prevGrid);
-        toast.info("Undo");
+        toast.info("Undo: Reverted previous change");
       }
+    } else {
+      toast.info("Nothing more to undo");
     }
   }, [history, historyIdx]);
 
   const handleRedo = useCallback(() => {
     if (historyIdx < history.length - 1) {
-      const nextGrid = history[historyIdx + 1];
+      const targetIdx = historyIdx + 1;
+      const nextGrid = history[targetIdx];
       if (nextGrid) {
-        setHistoryIdx((prev) => prev + 1);
+        setHistoryIdx(targetIdx);
         setGrid(nextGrid);
-        toast.info("Redo");
+        toast.info("Redo: Restored change");
       }
+    } else {
+      toast.info("Nothing more to redo");
     }
   }, [history, historyIdx]);
 
@@ -475,12 +487,16 @@ export function ExcelWorkbook({
     }
   }, [editingCell]);
 
-  // Active cell coordinate label (e.g. A1, D3)
+  // Active cell coordinate label (e.g. A1, or range A1:C5 (15 cells))
   const activeCoordLabel = useMemo(() => {
-    const colLetter = columns[selectedCell.c]?.letter || getColumnLetter(selectedCell.c);
-    const rowNum = selectedCell.r + 1;
-    return `${colLetter}${rowNum}`;
-  }, [columns, selectedCell]);
+    const startLetter = columns[selMinC]?.letter || getColumnLetter(selMinC);
+    const endLetter = columns[selMaxC]?.letter || getColumnLetter(selMaxC);
+    if (selMinR === selMaxR && selMinC === selMaxC) {
+      return `${startLetter}${selMinR + 1}`;
+    }
+    const cellCount = (selMaxR - selMinR + 1) * (selMaxC - selMinC + 1);
+    return `${startLetter}${selMinR + 1}:${endLetter}${selMaxR + 1} (${cellCount})`;
+  }, [columns, selMinC, selMaxC, selMinR, selMaxR]);
 
   // Active cell value
   const activeCellValue = grid[selectedCell.r]?.[selectedCell.c] || "";
@@ -823,7 +839,7 @@ export function ExcelWorkbook({
       if (target) {
         const tagName = target.tagName;
         if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") {
-          if (target !== cellEditInputRef.current) {
+          if (target !== cellInputRef.current) {
             return;
           }
         }
@@ -836,22 +852,22 @@ export function ExcelWorkbook({
     [editingCell, parseClipboardText],
   );
 
-  const handlePasteFromButton = async () => {
+  const handlePasteFromClipboard = useCallback(async () => {
     try {
       const text = await navigator.clipboard.readText();
-      if (!text) {
+      if (!text || !text.trim()) {
         toast.error("Clipboard is empty", {
-          description: "Copy rows from Excel, Google Sheets, or CSV first, then paste here.",
+          description: "Copy rows or cells from Excel, Google Sheets, or table first.",
         });
         return;
       }
       parseClipboardText(text);
     } catch {
-      toast.error("Clipboard access denied", {
-        description: "Please press Ctrl+V directly on the grid to paste.",
+      toast.error("Clipboard access blocked by browser", {
+        description: "Please check your browser permissions for clipboard reading or paste using Ctrl+V.",
       });
     }
-  };
+  }, [parseClipboardText]);
 
   const handleCopySelected = useCallback(() => {
     const lines: string[] = [];
@@ -863,11 +879,40 @@ export function ExcelWorkbook({
       lines.push(rowVals.join("\t"));
     }
     const tsv = lines.join("\r\n");
-    navigator.clipboard.writeText(tsv);
-    toast.success("Copied to Clipboard", {
-      description: `Copied ${selMaxR - selMinR + 1} rows to clipboard in standard Excel format.`,
+    navigator.clipboard.writeText(tsv).then(() => {
+      const numRows = selMaxR - selMinR + 1;
+      const numCols = selMaxC - selMinC + 1;
+      const totalCells = numRows * numCols;
+      toast.success("Copied to Clipboard (Ctrl+C)", {
+        description: `Copied ${totalCells} cell${totalCells > 1 ? "s" : ""} (${numRows} row${numRows > 1 ? "s" : ""} × ${numCols} col${numCols > 1 ? "s" : ""}) in standard Excel format.`,
+      });
+    }).catch(() => {
+      toast.error("Failed to copy to clipboard");
     });
   }, [grid, selMinR, selMaxR, selMinC, selMaxC]);
+
+  const handleDeleteSelectedCells = useCallback(() => {
+    let deletedCount = 0;
+    const newGrid = grid.map((row, ri) => {
+      if (ri < selMinR || ri > selMaxR) return row;
+      return row.map((cell, ci) => {
+        if (ci >= selMinC && ci <= selMaxC) {
+          if (cell !== "") deletedCount++;
+          return "";
+        }
+        return cell;
+      });
+    });
+    if (deletedCount > 0) {
+      commitToHistory(newGrid);
+      const totalCells = (selMaxR - selMinR + 1) * (selMaxC - selMinC + 1);
+      toast.success(`Deleted ${deletedCount} cell value${deletedCount > 1 ? "s" : ""}`, {
+        description: `Cleared ${totalCells} selected cell${totalCells > 1 ? "s" : ""}. Press Ctrl+Z to undo.`,
+      });
+    } else {
+      toast.info("Selected cells are already empty");
+    }
+  }, [grid, selMinR, selMaxR, selMinC, selMaxC, commitToHistory]);
 
   // -------------------------------------------------------------
   // SIGNATURE FEATURE: DRAG-TO-FILL AUTOFILL HANDLE
@@ -1069,6 +1114,43 @@ export function ExcelWorkbook({
     };
   };
 
+  const handleCellMouseDown = (r: number, c: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return; // primary left click only
+
+    if (gridContainerRef.current) {
+      gridContainerRef.current.focus({ preventScroll: true });
+    }
+
+    if (e.shiftKey) {
+      e.preventDefault();
+      setSelectionRange({
+        startR: selectedCell.r,
+        startC: selectedCell.c,
+        endR: r,
+        endC: c,
+      });
+      return;
+    }
+
+    if (!editingCell) {
+      setSelectedCell({ r, c });
+      setSelectionRange({ startR: r, startC: c, endR: r, endC: c });
+      setIsSelectingRange(true);
+      setLastAutoFill(null);
+      setAutoFillOptionsOpen(false);
+    }
+  };
+
+  const handleCellMouseEnter = (r: number, c: number) => {
+    if (isSelectingRange) {
+      setSelectionRange((prev) => ({
+        ...prev,
+        endR: r,
+        endC: c,
+      }));
+    }
+  };
+
   // Keyboard navigation & hotkeys
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // If typing inside ANY input, textarea, or select outside of the spreadsheet's active cell editor, DO NOT INTERCEPT!
@@ -1076,7 +1158,7 @@ export function ExcelWorkbook({
     if (target) {
       const tagName = target.tagName;
       if (tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT") {
-        if (target !== cellEditInputRef.current) {
+        if (target !== cellInputRef.current) {
           return;
         }
       }
@@ -1098,6 +1180,85 @@ export function ExcelWorkbook({
       return;
     }
 
+    // Ctrl / Cmd shortcuts
+    if (e.ctrlKey || e.metaKey) {
+      const k = e.key.toLowerCase();
+      if (k === "c") {
+        e.preventDefault();
+        handleCopySelected();
+        return;
+      }
+      // "ctrl p paste them" (and ctrl+v)
+      if (k === "p" || k === "v") {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePasteFromClipboard();
+        return;
+      }
+      if (k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if (k === "y") {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      if (k === "a") {
+        e.preventDefault();
+        setSelectedCell({ r: 0, c: 0 });
+        setSelectionRange({
+          startR: 0,
+          startC: 0,
+          endR: grid.length - 1,
+          endC: columns.length - 1,
+        });
+        return;
+      }
+    }
+
+    // Shift + Arrow keys: Expand Selection Range
+    if (e.shiftKey) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectionRange((prev) => ({
+          ...prev,
+          endR: Math.min(grid.length - 1, prev.endR + 1),
+        }));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectionRange((prev) => ({
+          ...prev,
+          endR: Math.max(0, prev.endR - 1),
+        }));
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setSelectionRange((prev) => ({
+          ...prev,
+          endC: Math.min(columns.length - 1, prev.endC + 1),
+        }));
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setSelectionRange((prev) => ({
+          ...prev,
+          endC: Math.max(0, prev.endC - 1),
+        }));
+        return;
+      }
+    }
+
+    // Normal Arrow Navigation (without Shift)
     if (e.key === "ArrowDown") {
       e.preventDefault();
       const nextR = Math.min(grid.length - 1, selectedCell.r + 1);
@@ -1132,28 +1293,29 @@ export function ExcelWorkbook({
       setSelectionRange({ startR: nextR, startC: nextC, endR: nextR, endC: nextC });
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      const newGrid = grid.map((r, ri) =>
-        ri >= selMinR && ri <= selMaxR
-          ? r.map((c, ci) => (ci >= selMinC && ci <= selMaxC ? "" : c))
-          : r,
-      );
-      commitToHistory(newGrid);
-    } else if (e.ctrlKey || e.metaKey) {
-      if (e.key === "c" || e.key === "C") {
-        e.preventDefault();
-        handleCopySelected();
-      } else if (e.key === "z" || e.key === "Z") {
-        e.preventDefault();
-        if (e.shiftKey) handleRedo();
-        else handleUndo();
-      } else if (e.key === "y" || e.key === "Y") {
-        e.preventDefault();
-        handleRedo();
-      }
+      handleDeleteSelectedCells();
     } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
       startEditCell(selectedCell.r, selectedCell.c, e.key);
     }
   };
+
+  // Intercept window Ctrl+P when focused on or inside workbook so print dialog does not appear
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInsideWorkbook = gridContainerRef.current?.contains(target);
+      if (!isInsideWorkbook && document.activeElement !== gridContainerRef.current) return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePasteFromClipboard();
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown, { capture: true });
+  }, [handlePasteFromClipboard]);
 
   const handleAddRows = (count: number) => {
     const blank = createBlankRows(count, columns.length);
@@ -1163,8 +1325,10 @@ export function ExcelWorkbook({
 
   // Clear sheet — resets both grid rows and column titles/mappings
   const handleClearSheet = () => {
+    const blank = createBlankRows(INITIAL_ROW_COUNT, 7);
     setColumns(createBlankColumns(7));
-    setGrid(createBlankRows(INITIAL_ROW_COUNT, 7));
+    setGrid(blank);
+    commitToHistory(blank);
     setSelectedCell({ r: 0, c: 0 });
     setSelectionRange({ startR: 0, startC: 0, endR: 0, endC: 0 });
     toast.info("Cleared workbook and reset all column names");
@@ -1331,16 +1495,54 @@ export function ExcelWorkbook({
 
         {/* Action Buttons */}
         <div className="flex items-center flex-wrap gap-1.5">
+          {/* Undo Button */}
           <button
             type="button"
-            onClick={handlePasteFromButton}
-            className="h-8 px-3 rounded-lg text-xs font-bold bg-white text-emerald-950 hover:bg-emerald-50 border border-white shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
-            title="Paste tab-delimited or table data from your clipboard (Ctrl+V)"
+            onClick={handleUndo}
+            disabled={historyIdx <= 0}
+            className={cn(
+              "h-8 px-2.5 rounded-lg text-xs font-semibold border shadow-xs flex items-center gap-1 transition-all cursor-pointer",
+              historyIdx > 0
+                ? "bg-emerald-800 hover:bg-emerald-900 text-white border-emerald-500/60"
+                : "bg-emerald-900/40 text-emerald-300/40 border-emerald-800/40 cursor-not-allowed opacity-50",
+            )}
+            title="Undo last change (Ctrl+Z)"
           >
-            <ClipboardPaste className="size-3.5 text-emerald-700" />
-            <span>Paste from Excel</span>
+            <Undo2 className="size-3.5" />
+            <span className="hidden sm:inline">Undo</span>
           </button>
 
+          {/* Redo Button */}
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={historyIdx >= history.length - 1}
+            className={cn(
+              "h-8 px-2.5 rounded-lg text-xs font-semibold border shadow-xs flex items-center gap-1 transition-all cursor-pointer",
+              historyIdx < history.length - 1
+                ? "bg-emerald-800 hover:bg-emerald-900 text-white border-emerald-500/60"
+                : "bg-emerald-900/40 text-emerald-300/40 border-emerald-800/40 cursor-not-allowed opacity-50",
+            )}
+            title="Redo previous change (Ctrl+Y)"
+          >
+            <Redo2 className="size-3.5" />
+            <span className="hidden sm:inline">Redo</span>
+          </button>
+
+          <div className="h-4 w-px bg-white/30 mx-1 hidden sm:block" />
+
+          {/* Paste Button */}
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            className="h-8 px-3 rounded-lg text-xs font-bold bg-white text-emerald-950 hover:bg-emerald-50 border border-white shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+            title="Paste tab-delimited or table data from your clipboard (Ctrl+P / Ctrl+V)"
+          >
+            <ClipboardPaste className="size-3.5 text-emerald-700" />
+            <span>Paste (Ctrl+P)</span>
+          </button>
+
+          {/* Copy Button */}
           <button
             type="button"
             onClick={handleCopySelected}
@@ -1349,6 +1551,17 @@ export function ExcelWorkbook({
           >
             <Copy className="size-3.5 text-emerald-200" />
             <span>Copy (Ctrl+C)</span>
+          </button>
+
+          {/* Delete Cells Button */}
+          <button
+            type="button"
+            onClick={handleDeleteSelectedCells}
+            className="h-8 px-2.5 rounded-lg text-xs font-semibold bg-emerald-800 hover:bg-emerald-900 text-white border border-emerald-500/60 shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+            title="Delete contents of selected cells (Delete / Backspace)"
+          >
+            <Eraser className="size-3.5 text-emerald-200" />
+            <span className="hidden sm:inline">Clear Cells</span>
           </button>
 
           <div className="h-4 w-px bg-white/30 mx-1 hidden sm:block" />
@@ -1579,14 +1792,37 @@ export function ExcelWorkbook({
               <thead className="sticky top-0 z-20 bg-slate-100 dark:bg-slate-900 shadow-xs">
                 {/* Top Row: Column Letters A, B, C... & Delete Column Button */}
                 <tr className="border-b border-slate-300 dark:border-slate-800 text-muted-foreground text-[10px] font-mono">
-                  <th className="w-12 min-w-[48px] sticky top-0 left-0 z-40 bg-slate-300 dark:bg-slate-950 border-r border-slate-300 dark:border-slate-800 text-center py-1">
+                  <th
+                    onClick={() => {
+                      if (gridContainerRef.current) gridContainerRef.current.focus({ preventScroll: true });
+                      setSelectedCell({ r: 0, c: 0 });
+                      setSelectionRange({ startR: 0, startC: 0, endR: grid.length - 1, endC: columns.length - 1 });
+                    }}
+                    className="w-12 min-w-[48px] sticky top-0 left-0 z-40 bg-slate-300 dark:bg-slate-950 border-r border-slate-300 dark:border-slate-800 text-center py-1 cursor-pointer hover:bg-emerald-600 hover:text-white transition-colors"
+                    title="Select All (Ctrl+A)"
+                  >
                     #
                   </th>
                   {columns.map((col, colIdx) => (
                     <th
                       key={`letter-${col.id}`}
                       style={{ width: col.width || 150, minWidth: col.width || 150 }}
-                      className="border-r border-slate-300 dark:border-slate-800 px-2 py-1 font-bold text-center tracking-wider text-slate-700 dark:text-slate-300 relative group"
+                      onMouseDown={(e) => {
+                        if (gridContainerRef.current) gridContainerRef.current.focus({ preventScroll: true });
+                        if (e.shiftKey) {
+                          setSelectionRange((prev) => ({
+                            startR: 0,
+                            startC: selectedCell.c,
+                            endR: grid.length - 1,
+                            endC: colIdx,
+                          }));
+                        } else {
+                          setSelectedCell({ r: 0, c: colIdx });
+                          setSelectionRange({ startR: 0, startC: colIdx, endR: grid.length - 1, endC: colIdx });
+                        }
+                      }}
+                      className="border-r border-slate-300 dark:border-slate-800 px-2 py-1 font-bold text-center tracking-wider text-slate-700 dark:text-slate-300 relative group cursor-pointer hover:bg-emerald-500/20 transition-colors"
+                      title={`Select Column ${col.letter}`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-mono text-xs">{col.letter}</span>
@@ -1684,9 +1920,19 @@ export function ExcelWorkbook({
                 >
                   {/* Left Row Number (Sticky Left) */}
                   <td
-                    onClick={() => {
-                      setSelectedCell({ r, c: 0 });
-                      setSelectionRange({ startR: r, startC: 0, endR: r, endC: columns.length - 1 });
+                    onMouseDown={(e) => {
+                      if (gridContainerRef.current) gridContainerRef.current.focus({ preventScroll: true });
+                      if (e.shiftKey) {
+                        setSelectionRange((prev) => ({
+                          startR: selectedCell.r,
+                          startC: 0,
+                          endR: r,
+                          endC: columns.length - 1,
+                        }));
+                      } else {
+                        setSelectedCell({ r, c: 0 });
+                        setSelectionRange({ startR: r, startC: 0, endR: r, endC: columns.length - 1 });
+                      }
                     }}
                     className={cn(
                       "w-12 min-w-[48px] sticky left-0 z-20 border-r border-slate-300 dark:border-slate-800 font-mono text-[11px] text-center font-bold py-1.5 cursor-pointer select-none transition-colors",
@@ -1694,6 +1940,7 @@ export function ExcelWorkbook({
                         ? "bg-emerald-600 text-white"
                         : "bg-slate-100 dark:bg-slate-900 text-muted-foreground hover:bg-slate-200 dark:hover:bg-slate-800",
                     )}
+                    title={`Select Row ${r + 1}`}
                   >
                     {r + 1}
                   </td>
@@ -1715,6 +1962,11 @@ export function ExcelWorkbook({
                       c >= Math.min(fillDragPreview.startC, fillDragPreview.endC) &&
                       c <= Math.max(fillDragPreview.startC, fillDragPreview.endC);
 
+                    const isTopEdge = isInSelectionRange && r === selMinR;
+                    const isBottomEdge = isInSelectionRange && r === selMaxR;
+                    const isLeftEdge = isInSelectionRange && c === selMinC;
+                    const isRightEdge = isInSelectionRange && c === selMaxC;
+
                     return (
                       <td
                         key={`cell-${r}-${c}`}
@@ -1722,20 +1974,18 @@ export function ExcelWorkbook({
                         data-r={r}
                         data-c={c}
                         style={{ width: col.width || 150, minWidth: col.width || 150 }}
-                        onClick={() => {
-                          if (!isEditing) {
-                            setSelectedCell({ r, c });
-                            setSelectionRange({ startR: r, startC: c, endR: r, endC: c });
-                            setLastAutoFill(null);
-                            setAutoFillOptionsOpen(false);
-                          }
-                        }}
+                        onMouseDown={(e) => handleCellMouseDown(r, c, e)}
+                        onMouseEnter={() => handleCellMouseEnter(r, c)}
                         onDoubleClick={() => startEditCell(r, c)}
                         className={cn(
                           "relative border-r border-slate-200 dark:border-slate-800/80 px-2 py-1 text-xs transition-colors font-mono cursor-cell select-none",
                           col.align === "right" ? "text-right" : "text-left",
-                          isInSelectionRange && "bg-emerald-500/10 dark:bg-emerald-500/15",
-                          isSelected && "ring-2 ring-emerald-600 z-10 bg-emerald-500/15 font-semibold",
+                          isInSelectionRange && "bg-emerald-500/15 dark:bg-emerald-500/20",
+                          isTopEdge && "border-t-2 border-t-emerald-600",
+                          isBottomEdge && "border-b-2 border-b-emerald-600",
+                          isLeftEdge && "border-l-2 border-l-emerald-600",
+                          isRightEdge && "border-r-2 border-r-emerald-600",
+                          isSelected && "ring-2 ring-emerald-600 z-10 bg-emerald-500/25 font-bold shadow-xs",
                           isInFillPreview &&
                             "border-2 border-dashed border-emerald-600 bg-emerald-500/20",
                         )}

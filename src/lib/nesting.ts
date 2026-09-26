@@ -349,7 +349,7 @@ export type ScoringWeights = {
 export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights> = {
   fast: {
     materialUtilization: 1.0,
-    sheetCountPenalty: 50.0,
+    sheetCountPenalty: 100000.0, // Strict priority #1: Fewer sheets dominates!
     cutLengthPenalty: 0.1,
     reusableRemnantBonus: 10.0,
     fragmentedWastePenalty: 5.0,
@@ -360,7 +360,7 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
   },
   balanced: {
     materialUtilization: 2.0,
-    sheetCountPenalty: 100.0,
+    sheetCountPenalty: 100000.0, // Strict priority #1: Fewer sheets dominates!
     cutLengthPenalty: 0.2,
     reusableRemnantBonus: 25.0,
     fragmentedWastePenalty: 15.0,
@@ -371,7 +371,7 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
   },
   "max-yield": {
     materialUtilization: 5.0,
-    sheetCountPenalty: 250.0,
+    sheetCountPenalty: 100000.0, // Strict priority #1: Fewer sheets dominates!
     cutLengthPenalty: 0.1,
     reusableRemnantBonus: 50.0,
     fragmentedWastePenalty: 30.0,
@@ -382,7 +382,7 @@ export const DEFAULT_SCORING_WEIGHTS: Record<OptimizationPreset, ScoringWeights>
   },
   "guillotine-shear": {
     materialUtilization: 2.0,
-    sheetCountPenalty: 150.0,
+    sheetCountPenalty: 100000.0, // Strict priority #1: Fewer sheets dominates!
     cutLengthPenalty: 0.5,
     reusableRemnantBonus: 30.0,
     fragmentedWastePenalty: 20.0,
@@ -2119,6 +2119,107 @@ function evaluateGenome(
  * Enables ONE long vertical guillotine cut to separate the entire column strip, followed by small horizontal cross cuts.
  * Dynamically tests 0° and 90° rotation for every individual part to match the column width.
  */
+/**
+ * Fast Dynamic Programming 1D Knapsack for exact span fill in guillotine strips.
+ * Given candidate items with lengths s_i = dim_i + kerf and capacity C = targetSpan + kerf,
+ * finds the subset that maximizes total length <= targetSpan.
+ */
+function dpKnapsack1D<T extends PackingItem>(
+  candidates: Array<{ item: T; w: number; h: number; rotated: boolean; spanLen: number }>,
+  targetSpan: number,
+  kerf: number
+): Array<{ item: T; w: number; h: number; rotated: boolean; spanLen: number }> {
+  if (!candidates || candidates.length === 0) return [];
+  const C = targetSpan + kerf;
+  if (C <= 0) return [];
+
+  // Filter candidates to avoid redundant DP iterations while preserving part diversity
+  const typeMap = new Map<string, number>();
+  const filtered: typeof candidates = [];
+  for (const c of candidates) {
+    const key = `${c.item.part.id}_${c.w}x${c.h}`;
+    const count = typeMap.get(key) || 0;
+    const maxNeeded = Math.ceil(targetSpan / Math.max(1, c.spanLen)) + 2;
+    if (count < maxNeeded) {
+      typeMap.set(key, count + 1);
+      filtered.push(c);
+    }
+  }
+
+  const N = filtered.length;
+  const prevItem = new Int32Array(C + 1).fill(-1);
+  const prevCap = new Int32Array(C + 1).fill(-1);
+  const dp = new Uint8Array(C + 1);
+  dp[0] = 1;
+
+  let maxReached = 0;
+
+  for (let i = 0; i < N; i++) {
+    const item = filtered[i]!;
+    const weight = item.spanLen + kerf;
+    if (weight > C) continue;
+
+    for (let cap = C; cap >= weight; cap--) {
+      if (dp[cap - weight] === 1 && dp[cap] === 0) {
+        dp[cap] = 1;
+        prevItem[cap] = i;
+        prevCap[cap] = cap - weight;
+        if (cap > maxReached) maxReached = cap;
+      }
+    }
+    if (maxReached >= C - kerf) break;
+  }
+
+  let bestCap = maxReached;
+  while (bestCap > 0 && dp[bestCap] === 0) bestCap--;
+
+  if (bestCap <= 0) {
+    const single = candidates.find((c) => c.spanLen <= targetSpan);
+    return single ? [single] : [];
+  }
+
+  const chosen: typeof candidates = [];
+  let curr = bestCap;
+  while (curr > 0 && prevItem[curr] !== -1) {
+    const itemIdx = prevItem[curr]!;
+    chosen.push(filtered[itemIdx]!);
+    curr = prevCap[curr]!;
+  }
+
+  // Sort chosen items for clean collinear visual appearance
+  chosen.sort((a, b) => a.item.part.item.localeCompare(b.item.part.item) || b.spanLen - a.spanLen);
+  return chosen;
+}
+
+function knapsackHeightDesc<T extends PackingItem>(
+  candidates: Array<{ item: T; w: number; h: number; rotated: boolean; spanLen: number }>,
+  targetSpan: number,
+  kerf: number
+): Array<{ item: T; w: number; h: number; rotated: boolean; spanLen: number }> {
+  if (!candidates || candidates.length === 0) return [];
+  const sorted = [...candidates].sort(
+    (a, b) => b.spanLen - a.spanLen || a.item.part.item.localeCompare(b.item.part.item)
+  );
+  const chosen: typeof candidates = [];
+  let currentSpan = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const c = sorted[i]!;
+    const nextSpan = currentSpan + (chosen.length > 0 ? kerf : 0) + c.spanLen;
+    if (nextSpan <= targetSpan) {
+      chosen.push(c);
+      currentSpan = nextSpan;
+      if (currentSpan >= targetSpan - 3) break;
+    }
+  }
+  return chosen;
+}
+
+/**
+ * Industrial Guillotine Vertical Column Strip Packer with DP Knapsack.
+ * Aligns parts of identical width into continuous, unbroken vertical columns along Y.
+ * Enables ONE long vertical guillotine shear pass from top to bottom edge, followed by horizontal cross cuts.
+ * Guarantees zero lateral voids, straight shear cut lines, and maximum height fill.
+ */
 export function packGuillotineColumnSheet(
   items: PackingItem[],
   curSheetLength: number,
@@ -2133,7 +2234,7 @@ export function packGuillotineColumnSheet(
   const usableL = curSheetLength - trim * 2;
   const usableW = curSheetWidth - trim * 2;
 
-  let remainingQueue = items.slice();
+  let remainingQueue = items.map((it, idx) => ({ ...it, qId: idx }));
   const sheets: NestedSheet[] = [];
 
   while (remainingQueue.length > 0) {
@@ -2147,109 +2248,73 @@ export function packGuillotineColumnSheet(
       const remainingSpaceW = curSheetLength - trim - currentX;
       if (remainingSpaceW <= 0) break;
 
-      // Frequency map of candidate widths to pick the most common column width
-      const widthFreq = new Map<number, number>();
-      for (const item of remainingQueue) {
+      // Group available items by candidate width
+      const widthMap = new Map<
+        number,
+        Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }>
+      >();
+      for (let i = 0; i < remainingQueue.length; i++) {
+        const item = remainingQueue[i]!;
+        const canRotate = config.rotation && item.w !== item.h;
+
         if (item.w <= remainingSpaceW && item.h <= usableW) {
-          widthFreq.set(item.w, (widthFreq.get(item.w) || 0) + 1);
+          if (!widthMap.has(item.w)) widthMap.set(item.w, []);
+          widthMap.get(item.w)!.push({ item, h: item.h, w: item.w, rotated: item.rotated, spanLen: item.h });
         }
-        if (config.rotation && item.w !== item.h && item.h <= remainingSpaceW && item.w <= usableW) {
-          widthFreq.set(item.h, (widthFreq.get(item.h) || 0) + 1);
-        }
-      }
-
-      let colWidth = 0;
-      let maxFreq = 0;
-      for (const [wCandidate, freq] of widthFreq) {
-        if (freq > maxFreq || (freq === maxFreq && wCandidate > colWidth)) {
-          maxFreq = freq;
-          colWidth = wCandidate;
+        if (canRotate && item.h <= remainingSpaceW && item.w <= usableW) {
+          if (!widthMap.has(item.h)) widthMap.set(item.h, []);
+          widthMap.get(item.h)!.push({ item, h: item.w, w: item.h, rotated: !item.rotated, spanLen: item.w });
         }
       }
 
-      if (colWidth <= 0) {
-        for (let i = 0; i < remainingQueue.length; i++) {
-          const item = remainingQueue[i]!;
-          if (item.w <= remainingSpaceW && item.h <= usableW && item.w > colWidth) {
-            colWidth = item.w;
-          }
-          if (config.rotation && item.h <= remainingSpaceW && item.w <= usableW && item.h > colWidth) {
-            colWidth = item.h;
-          }
+      if (widthMap.size === 0) break;
+
+      let bestWidth = 0;
+      let bestCombination: Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }> = [];
+      let bestFillH = 0;
+
+      for (const [w, candidates] of widthMap) {
+        // Compare DP knapsack vs height-descending knapsack to find optimal fill
+        const comboDP = dpKnapsack1D(candidates, usableW, kerf);
+        const comboDesc = knapsackHeightDesc(candidates, usableW, kerf);
+        const fillDP = comboDP.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDP.length - 1) * kerf;
+        const fillDesc = comboDesc.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDesc.length - 1) * kerf;
+
+        const combo = fillDP >= fillDesc ? comboDP : comboDesc;
+        const comboH = Math.max(fillDP, fillDesc);
+
+        if (comboH > bestFillH || (comboH === bestFillH && w > bestWidth)) {
+          bestFillH = comboH;
+          bestWidth = w;
+          bestCombination = combo;
         }
       }
 
-      if (colWidth <= 0) break;
+      if (bestWidth <= 0 || bestCombination.length === 0) break;
 
       let currentY = trim;
-      let lastPlacedItem: PackingItem | null = null;
-
-      // Fill this vertical column (x: currentX, width: colWidth) along Y
-      while (currentY < curSheetWidth - trim && remainingQueue.length > 0) {
-        const remainingSpaceH = curSheetWidth - trim - currentY;
-        if (remainingSpaceH <= 0) break;
-
-        let bestItemIdx = -1;
-        let bestW = 0;
-        let bestH = 0;
-        let bestRotated = false;
-        let bestScore = Infinity;
-
-        for (let i = 0; i < remainingQueue.length; i++) {
-          const item = remainingQueue[i]!;
-          const canRotate = config.rotation && item.w !== item.h;
-
-          let orientations = [{ w: item.w, h: item.h, rotated: item.rotated }];
-          if (canRotate) {
-            orientations.push({ w: item.h, h: item.w, rotated: !item.rotated });
-          }
-
-          for (const orient of orientations) {
-            if (orient.w <= colWidth && orient.h <= remainingSpaceH) {
-              const widthGap = colWidth - orient.w;
-              const heightLeftover = remainingSpaceH - orient.h;
-
-              // Heavy bonus if width matches colWidth EXACTLY (creates 100% straight continuous vertical cut line!)
-              const exactWidthBonus = orient.w === colWidth ? -80000 : 0;
-              // Bonus if same part mark / name as previous item in this column (keeps same parts in same line!)
-              const sameItemBonus = (lastPlacedItem && lastPlacedItem.part.item === item.part.item) ? -30000 : 0;
-              // Bonus if same dimensions as previous item
-              const sameDimBonus = (lastPlacedItem && lastPlacedItem.w === orient.w && lastPlacedItem.h === orient.h) ? -15000 : 0;
-
-              const score = widthGap * 2000 + heightLeftover + exactWidthBonus + sameItemBonus + sameDimBonus;
-
-              if (score < bestScore) {
-                bestScore = score;
-                bestItemIdx = i;
-                bestW = orient.w;
-                bestH = orient.h;
-                bestRotated = orient.rotated;
-              }
-            }
-          }
-        }
-
-        if (bestItemIdx === -1) break;
-
-        const chosen = remainingQueue[bestItemIdx]!;
+      for (const chosen of bestCombination) {
         placed.push({
           key: `${sheetId}-${index}`,
-          part: chosen.part,
+          part: chosen.item.part,
           x: currentX,
           y: currentY,
-          w: bestW,
-          h: bestH,
-          rotated: bestRotated,
+          w: chosen.w,
+          h: chosen.h,
+          rotated: chosen.rotated,
           index: index++,
         });
 
-        usedArea += bestW * bestH;
-        currentY += bestH + kerf;
-        lastPlacedItem = { ...chosen, w: bestW, h: bestH, rotated: bestRotated };
-        remainingQueue.splice(bestItemIdx, 1);
+        usedArea += chosen.w * chosen.h;
+        currentY += chosen.h + kerf;
+
+        const remIdx = remainingQueue.findIndex((r) => r.qId === chosen.item.qId);
+        if (remIdx !== -1) {
+          remainingQueue.splice(remIdx, 1);
+        }
       }
 
-      currentX += colWidth + kerf;
+      currentX += bestWidth + kerf;
     }
 
     if (placed.length === 0) break;
@@ -2270,10 +2335,9 @@ export function packGuillotineColumnSheet(
 }
 
 /**
- * Industrial Guillotine Horizontal Shelf Strip Packer.
- * Aligns parts into uniform horizontal strips (shelves) to eliminate fragmentation.
- * Enables ONE long horizontal guillotine cut to separate the shelf strip, followed by small vertical cuts.
- * Dynamically tests 0° and 90° rotation for every individual part to match shelf height.
+ * Industrial Guillotine Horizontal Shelf Strip Packer with DP Knapsack.
+ * Aligns parts into uniform horizontal strips (shelves) to eliminate lateral fragmentation.
+ * Enables ONE long horizontal guillotine shear cut across the sheet, followed by small vertical cuts.
  */
 export function packGuillotineShelfSheet(
   items: PackingItem[],
@@ -2289,7 +2353,7 @@ export function packGuillotineShelfSheet(
   const usableL = curSheetLength - trim * 2;
   const usableW = curSheetWidth - trim * 2;
 
-  let remainingQueue = items.slice();
+  let remainingQueue = items.map((it, idx) => ({ ...it, qId: idx }));
   const sheets: NestedSheet[] = [];
 
   while (remainingQueue.length > 0) {
@@ -2303,104 +2367,72 @@ export function packGuillotineShelfSheet(
       const remainingSpaceH = curSheetWidth - trim - currentY;
       if (remainingSpaceH <= 0) break;
 
-      const heightFreq = new Map<number, number>();
-      for (const item of remainingQueue) {
+      // Group available items by candidate shelf height
+      const heightMap = new Map<
+        number,
+        Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }>
+      >();
+      for (let i = 0; i < remainingQueue.length; i++) {
+        const item = remainingQueue[i]!;
+        const canRotate = config.rotation && item.w !== item.h;
+
         if (item.h <= remainingSpaceH && item.w <= usableL) {
-          heightFreq.set(item.h, (heightFreq.get(item.h) || 0) + 1);
+          if (!heightMap.has(item.h)) heightMap.set(item.h, []);
+          heightMap.get(item.h)!.push({ item, w: item.w, h: item.h, rotated: item.rotated, spanLen: item.w });
         }
-        if (config.rotation && item.w !== item.h && item.w <= remainingSpaceH && item.h <= usableL) {
-          heightFreq.set(item.w, (heightFreq.get(item.w) || 0) + 1);
-        }
-      }
-
-      let shelfHeight = 0;
-      let maxFreq = 0;
-      for (const [hCandidate, freq] of heightFreq) {
-        if (freq > maxFreq || (freq === maxFreq && hCandidate > shelfHeight)) {
-          maxFreq = freq;
-          shelfHeight = hCandidate;
+        if (canRotate && item.w <= remainingSpaceH && item.h <= usableL) {
+          if (!heightMap.has(item.w)) heightMap.set(item.w, []);
+          heightMap.get(item.w)!.push({ item, w: item.h, h: item.w, rotated: !item.rotated, spanLen: item.h });
         }
       }
 
-      if (shelfHeight <= 0) {
-        for (let i = 0; i < remainingQueue.length; i++) {
-          const item = remainingQueue[i]!;
-          if (item.h <= remainingSpaceH && item.w <= usableL && item.h > shelfHeight) {
-            shelfHeight = item.h;
-          }
-          if (config.rotation && item.w <= remainingSpaceH && item.h <= usableL && item.w > shelfHeight) {
-            shelfHeight = item.w;
-          }
+      if (heightMap.size === 0) break;
+
+      let bestHeight = 0;
+      let bestCombination: Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }> = [];
+      let bestFillL = 0;
+
+      for (const [h, candidates] of heightMap) {
+        const comboDP = dpKnapsack1D(candidates, usableL, kerf);
+        const comboDesc = knapsackHeightDesc(candidates, usableL, kerf);
+        const fillDP = comboDP.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDP.length - 1) * kerf;
+        const fillDesc = comboDesc.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDesc.length - 1) * kerf;
+
+        const combo = fillDP >= fillDesc ? comboDP : comboDesc;
+        const comboL = Math.max(fillDP, fillDesc);
+
+        if (comboL > bestFillL || (comboL === bestFillL && h > bestHeight)) {
+          bestFillL = comboL;
+          bestHeight = h;
+          bestCombination = combo;
         }
       }
 
-      if (shelfHeight <= 0) break;
+      if (bestHeight <= 0 || bestCombination.length === 0) break;
 
       let currentX = trim;
-      let lastPlacedItem: PackingItem | null = null;
-
-      while (currentX < curSheetLength - trim && remainingQueue.length > 0) {
-        const remainingSpaceW = curSheetLength - trim - currentX;
-        if (remainingSpaceW <= 0) break;
-
-        let bestItemIdx = -1;
-        let bestW = 0;
-        let bestH = 0;
-        let bestRotated = false;
-        let bestScore = Infinity;
-
-        for (let i = 0; i < remainingQueue.length; i++) {
-          const item = remainingQueue[i]!;
-          const canRotate = config.rotation && item.w !== item.h;
-
-          let orientations = [{ w: item.w, h: item.h, rotated: item.rotated }];
-          if (canRotate) {
-            orientations.push({ w: item.h, h: item.w, rotated: !item.rotated });
-          }
-
-          for (const orient of orientations) {
-            if (orient.w <= remainingSpaceW && orient.h <= shelfHeight) {
-              const heightGap = shelfHeight - orient.h;
-              const widthLeftover = remainingSpaceW - orient.w;
-
-              const exactHeightBonus = orient.h === shelfHeight ? -80000 : 0;
-              const sameItemBonus = (lastPlacedItem && lastPlacedItem.part.item === item.part.item) ? -30000 : 0;
-              const sameDimBonus = (lastPlacedItem && lastPlacedItem.w === orient.w && lastPlacedItem.h === orient.h) ? -15000 : 0;
-
-              const score = heightGap * 2000 + widthLeftover + exactHeightBonus + sameItemBonus + sameDimBonus;
-
-              if (score < bestScore) {
-                bestScore = score;
-                bestItemIdx = i;
-                bestW = orient.w;
-                bestH = orient.h;
-                bestRotated = orient.rotated;
-              }
-            }
-          }
-        }
-
-        if (bestItemIdx === -1) break;
-
-        const chosen = remainingQueue[bestItemIdx]!;
+      for (const chosen of bestCombination) {
         placed.push({
           key: `${sheetId}-${index}`,
-          part: chosen.part,
+          part: chosen.item.part,
           x: currentX,
           y: currentY,
-          w: bestW,
-          h: bestH,
-          rotated: bestRotated,
+          w: chosen.w,
+          h: chosen.h,
+          rotated: chosen.rotated,
           index: index++,
         });
 
-        usedArea += bestW * bestH;
-        currentX += bestW + kerf;
-        lastPlacedItem = { ...chosen, w: bestW, h: bestH, rotated: bestRotated };
-        remainingQueue.splice(bestItemIdx, 1);
+        usedArea += chosen.w * chosen.h;
+        currentX += chosen.w + kerf;
+
+        const remIdx = remainingQueue.findIndex((r) => r.qId === chosen.item.qId);
+        if (remIdx !== -1) {
+          remainingQueue.splice(remIdx, 1);
+        }
       }
 
-      currentY += shelfHeight + kerf;
+      currentY += bestHeight + kerf;
     }
 
     if (placed.length === 0) break;
@@ -2858,34 +2890,62 @@ export function solveBucketPopulation(
     const candidateSheets = postOptimizationRecompact(candidateSheetsRaw, config);
     if (candidateSheets.length === 0) return;
 
-    const candUtil = candidateSheets.reduce((a, s) => a + s.usedArea, 0) /
-      (candidateSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1) * 100;
-    const bestUtil = bestSheets.reduce((a, s) => a + s.usedArea, 0) /
-      (bestSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1) * 100;
+    const candUtil =
+      (candidateSheets.reduce((a, s) => a + s.usedArea, 0) /
+        (candidateSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1)) *
+      100;
+    const bestUtil =
+      (bestSheets.reduce((a, s) => a + s.usedArea, 0) /
+        (bestSheets.reduce((a, s) => a + s.sheetLength * s.sheetWidth, 0) || 1)) *
+      100;
 
     const candScore = evaluateLayoutScore(candidateSheets, weights, config).score;
     const bestScoreVal = evaluateLayoutScore(bestSheets, weights, config).score;
 
-    const candMaxX = candidateSheets.reduce(
-      (m, s) => Math.max(m, ...s.placed.map((p) => p.x + p.w)),
-      0
-    );
-    const bestMaxX = bestSheets.reduce(
-      (m, s) => Math.max(m, ...s.placed.map((p) => p.x + p.w)),
-      0
-    );
+    // Evaluate last sheet maxX to maximize single contiguous reusable remnant
+    const lastCand = candidateSheets[candidateSheets.length - 1];
+    const lastBest = bestSheets[bestSheets.length - 1];
+    const lastCandMaxX = lastCand && lastCand.placed.length > 0
+      ? Math.max(...lastCand.placed.map((p) => p.x + p.w))
+      : 0;
+    const lastBestMaxX = lastBest && lastBest.placed.length > 0
+      ? Math.max(...lastBest.placed.map((p) => p.x + p.w))
+      : 0;
 
     if (
       candidateSheets.length < bestSheets.length ||
-      (candidateSheets.length === bestSheets.length && candUtil > bestUtil + 0.3) ||
-      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.3 && candMaxX < bestMaxX - 5) ||
-      (candidateSheets.length === bestSheets.length && Math.abs(candUtil - bestUtil) <= 0.3 && Math.abs(candMaxX - bestMaxX) <= 5 && candScore > bestScoreVal)
+      (candidateSheets.length === bestSheets.length && candScore > bestScoreVal) ||
+      (candidateSheets.length === bestSheets.length && Math.abs(candScore - bestScoreVal) <= 1.0 && lastCandMaxX < lastBestMaxX - 5)
     ) {
       bestSheets = candidateSheets;
     }
   }
 
-  // 3. Multi-Algorithm Best-Fitting Evaluation Tournament:
+  // 3. Direct Fast DP Guillotine Strip Evaluation:
+  // Immediately test DP Guillotine Column and Shelf Strip Packers on full queue
+  const colDirect = packGuillotineColumnSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "COL-DP"
+  );
+  tryCandidateSheets(colDirect);
+
+  const shelfDirect = packGuillotineShelfSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "SHELF-DP"
+  );
+  tryCandidateSheets(shelfDirect);
+
+  // 4. Multi-Algorithm Best-Fitting Evaluation Tournament:
   // Evaluates Guillotine Columns, Guillotine Shelves, MaxRects BFD, and Skyline BL across multiple ordering policies
   const tournamentPolicies: GRASPPolicy[] = [
     "same-type-clustered",

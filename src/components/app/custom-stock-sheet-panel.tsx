@@ -507,7 +507,7 @@ export function CustomStockSheetPanel({
                 <span>
                   Any unlisted material automatically uses primary stock size:{" "}
                   <strong className="text-foreground font-mono font-bold">
-                    {customStockSheets[0].sheetWidth} × {customStockSheets[0].sheetLength} mm
+                    {customStockSheets[0]?.sheetWidth ?? 1500} × {customStockSheets[0]?.sheetLength ?? 6000} mm
                   </strong>
                 </span>
               </li>
