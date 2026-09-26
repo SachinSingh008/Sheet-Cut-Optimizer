@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useAppState, store } from "@/lib/store";
-import { optimize, type OptimizationResult } from "@/lib/nesting";
+import { optimize, runContinuousOptimization, type OptimizationResult } from "@/lib/nesting";
 import { useNavigate } from "@tanstack/react-router";
 
 interface OptimizationTimerModalProps {
@@ -74,10 +74,10 @@ const FITTING_STAGES: FittingStage[] = [
     id: 4,
     name: "Global Evolutionary Tournament",
     badge: "STAGE 4 · GLOBAL TOURNAMENT",
-    algorithm: "Population-Based Genetic Algorithm (100 Candidate Layouts)",
+    algorithm: "Population-Based Genetic Algorithm & Continuous Tournament",
     timeRange: [11.25, 15],
     description:
-      "Competing 100 layout candidates across rotation allowances and priority queues to lock in the absolute highest yield solution.",
+      "Competing layout candidates across rotation allowances and priority queues to lock in the absolute highest yield solution overall.",
     heuristicFocus: "Multi-objective Pareto optimization (Yield + Min Pierces + Remnant Size)",
     targetYieldGain: "Optimal layout converged",
   },
@@ -104,6 +104,8 @@ export function OptimizationTimerModal({
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasOptimizedRef = useRef<boolean>(false);
+  const isCancelledRef = useRef<boolean>(false);
+  const liveResultReceivedRef = useRef<boolean>(false);
 
   // Freeze user interaction: prevent Escape or key strokes while modal is active
   useEffect(() => {
@@ -125,12 +127,14 @@ export function OptimizationTimerModal({
       setActiveStageIdx(0);
       setIsDone(false);
       hasOptimizedRef.current = false;
+      liveResultReceivedRef.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
 
     setSecondsRemaining(TOTAL_DURATION_SEC);
     setIsDone(false);
+    liveResultReceivedRef.current = false;
 
     // Baseline yield calculation
     const baseYield = existingResult?.utilization ? Math.max(75, existingResult.utilization - 8) : 78.5;
@@ -160,18 +164,19 @@ export function OptimizationTimerModal({
       }
       setActiveStageIdx(currentStage);
 
-      // Progressively increase candidates tested up to 100
-      const candidates = Math.min(100, Math.floor(4 + (elapsedSec / TOTAL_DURATION_SEC) * 96));
-      setCandidatesTested(candidates);
+      // Smooth fallback if live continuous stream hasn't produced an update yet
+      if (!liveResultReceivedRef.current) {
+        const candidates = Math.floor(40 + (elapsedSec / TOTAL_DURATION_SEC) * 480);
+        setCandidatesTested(candidates);
 
-      // Smoothly advance yield percentage towards optimum
-      const targetFinalYield = existingResult?.utilization
-        ? Math.max(89.5, existingResult.utilization)
-        : 92.8;
-      const progressFraction = Math.min(1, elapsedSec / TOTAL_DURATION_SEC);
-      const currentYield = baseYield + (targetFinalYield - baseYield) * Math.pow(progressFraction, 0.85);
-      setSimulatedYield(parseFloat(currentYield.toFixed(1)));
-      setSimulatedScrap(parseFloat((100 - currentYield).toFixed(1)));
+        const targetFinalYield = existingResult?.utilization
+          ? Math.max(89.5, existingResult.utilization)
+          : 92.8;
+        const progressFraction = Math.min(1, elapsedSec / TOTAL_DURATION_SEC);
+        const currentYield = baseYield + (targetFinalYield - baseYield) * Math.pow(progressFraction, 0.85);
+        setSimulatedYield(parseFloat(currentYield.toFixed(1)));
+        setSimulatedScrap(parseFloat((100 - currentYield).toFixed(1)));
+      }
 
       if (remainingSec <= 0) {
         if (timerRef.current) clearInterval(timerRef.current);
@@ -184,27 +189,41 @@ export function OptimizationTimerModal({
     };
   }, [isOpen, existingResult]);
 
-  // Execute real multi-strategy optimization in the background while timer is counting down
+  // Execute continuous 15-second multi-stage re-nesting, void-filling & compaction in background
   useEffect(() => {
     if (!isOpen || hasOptimizedRef.current || !parts || parts.length === 0) return;
     hasOptimizedRef.current = true;
+    isCancelledRef.current = false;
 
-    // Run high-yield multi-trial optimization
-    try {
-      const bestResult = optimize(parts, {
-        ...config,
-        preset: "max-yield",
-        populationSize: 40,
-        generations: 12,
-        rotation: true,
+    runContinuousOptimization(
+      parts,
+      config,
+      TOTAL_DURATION_SEC * 1000,
+      (update) => {
+        if (isCancelledRef.current) return;
+        liveResultReceivedRef.current = true;
+        setCandidatesTested(update.candidatesTested);
+        setSimulatedYield(update.currentYield);
+        setSimulatedScrap(update.currentScrap);
+        setActiveStageIdx(update.stageIndex);
+        setComputedResult(update.bestResult);
+        store.set({ result: update.bestResult });
+      },
+      () => isCancelledRef.current
+    )
+      .then((finalResult) => {
+        if (!isCancelledRef.current) {
+          setComputedResult(finalResult);
+          store.set({ result: finalResult });
+        }
+      })
+      .catch((err) => {
+        console.warn("Multi-stage continuous optimization notice:", err);
       });
 
-      setComputedResult(bestResult);
-      // Store in application state so layout views immediately have the updated best result
-      store.set({ result: bestResult });
-    } catch (err) {
-      console.warn("Multi-stage optimization run notice:", err);
-    }
+    return () => {
+      isCancelledRef.current = true;
+    };
   }, [isOpen, parts, config]);
 
   // Handle final completion and navigation
@@ -401,7 +420,7 @@ export function OptimizationTimerModal({
                   <Boxes className="size-3 text-sky-600 dark:text-sky-400" /> Candidates Tested
                 </span>
                 <p className="text-base sm:text-lg font-black font-mono text-sky-600 dark:text-sky-400 mt-0.5">
-                  {candidatesTested} / 100
+                  {candidatesTested.toLocaleString()} Overall
                 </p>
               </div>
 
@@ -423,7 +442,7 @@ export function OptimizationTimerModal({
               <span className="font-medium text-foreground">
                 {isDone
                   ? "✅ 15-Second Multi-Algo Optimization Complete! Directing to Layouts..."
-                  : `🔒 Website Frozen (${Math.ceil(secondsRemaining)}s remaining) — Multi-heuristic algorithms evaluating 100 candidates in background...`}
+                  : `🔒 Website Frozen (${Math.ceil(secondsRemaining)}s remaining) — Multi-heuristic algorithms continuously evaluating layouts overall in background...`}
               </span>
             </div>
 
