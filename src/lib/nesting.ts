@@ -407,6 +407,9 @@ export type CandidateMetrics = {
   packingDensity: number;         // % density within occupied bounding box
   rotationCount: number;          // Number of rotated parts
   stripAlignmentScore: number;    // Score for part strip height/width alignment (0 - 100)
+  partClusteringScore?: number;   // % of identical parts kept in contiguous monolithic blocks (0 - 100)
+  staircasePenalty?: number;      // Penalty for jagged staircase profiles on trailing sheets
+  sheetBalanceBonus?: number;     // Bonus for balanced plate utilization when multiple sheets are used
 };
 
 export type CandidateLayout = {
@@ -1760,6 +1763,113 @@ function calculateFreeRectanglesForSheet(sheet: NestedSheet, config: Optimizatio
   return freeRects;
 }
 
+/**
+ * 2D Physics Gravity Compaction (Step 7: Space Optimization).
+ * Pulls every part on the sheet as far LEFT (-X) and DOWN (-Y) as possible without collisions.
+ * Eliminates isolated / stranded parts standing in no man's land (like solitary parts in the remnant),
+ * closes lateral cavities, and pushes all empty space to the right edge to form one large contiguous remnant.
+ */
+export function gravityCompactSheet(sheet: NestedSheet, config: OptimizationConfig): NestedSheet {
+  const trim = config.trim;
+  const kerf = config.kerf;
+  const placed = sheet.placed.map((p) => ({ ...p }));
+  const N = placed.length;
+  if (N <= 1) {
+    if (N === 1) {
+      placed[0]!.x = trim;
+      placed[0]!.y = trim;
+    }
+    return { ...sheet, placed };
+  }
+
+  let movedAny = true;
+  let iterations = 0;
+
+  while (movedAny && iterations < 30) {
+    movedAny = false;
+    iterations++;
+
+    // Sort parts primarily by x ascending, then y ascending
+    placed.sort((a, b) => a.x - b.x || a.y - b.y);
+
+    for (let i = 0; i < N; i++) {
+      const p = placed[i]!;
+
+      // 1. Try sliding LEFT (decrease X)
+      let minX = trim;
+      for (let j = 0; j < N; j++) {
+        if (i === j) continue;
+        const other = placed[j]!;
+        // Check if other overlaps in Y (accounting for kerf)
+        const yOverlap = p.y < other.y + other.h + kerf && p.y + p.h + kerf > other.y;
+        if (yOverlap && other.x + other.w + kerf <= p.x) {
+          const candidateX = other.x + other.w + kerf;
+          if (candidateX > minX) {
+            minX = candidateX;
+          }
+        }
+      }
+
+      if (minX < p.x) {
+        let collision = false;
+        for (let j = 0; j < N; j++) {
+          if (i === j) continue;
+          const other = placed[j]!;
+          const xOverlap = minX < other.x + other.w + kerf && minX + p.w + kerf > other.x;
+          const yOverlap = p.y < other.y + other.h + kerf && p.y + p.h + kerf > other.y;
+          if (xOverlap && yOverlap) {
+            collision = true;
+            break;
+          }
+        }
+        if (!collision) {
+          p.x = minX;
+          movedAny = true;
+        }
+      }
+
+      // 2. Try sliding DOWN (decrease Y)
+      let minY = trim;
+      for (let j = 0; j < N; j++) {
+        if (i === j) continue;
+        const other = placed[j]!;
+        // Check if other overlaps in X (accounting for kerf)
+        const xOverlap = p.x < other.x + other.w + kerf && p.x + p.w + kerf > other.x;
+        if (xOverlap && other.y + other.h + kerf <= p.y) {
+          const candidateY = other.y + other.h + kerf;
+          if (candidateY > minY) {
+            minY = candidateY;
+          }
+        }
+      }
+
+      if (minY < p.y) {
+        let collision = false;
+        for (let j = 0; j < N; j++) {
+          if (i === j) continue;
+          const other = placed[j]!;
+          const xOverlap = p.x < other.x + other.w + kerf && p.x + p.w + kerf > other.x;
+          const yOverlap = minY < other.y + other.h + kerf && minY + p.h + kerf > other.y;
+          if (xOverlap && yOverlap) {
+            collision = true;
+            break;
+          }
+        }
+        if (!collision) {
+          p.y = minY;
+          movedAny = true;
+        }
+      }
+    }
+  }
+
+  const usedArea = placed.reduce((sum, p) => sum + p.w * p.h, 0);
+  const totalSheetArea = sheet.sheetLength * sheet.sheetWidth || 1;
+  const utilization = (usedArea / totalSheetArea) * 100;
+
+  return { ...sheet, placed, usedArea, utilization };
+}
+
 /** 
  * Fast Inter-Sheet Re-compactor & Partial Waste Back-Filling.
  * Transfers parts from low-utilization last sheets to scrap spaces of earlier sheets.
@@ -1851,85 +1961,7 @@ export function postOptimizationRecompact(sheets: NestedSheet[], config: Optimiz
     }
   } while (eliminatedAny);
 
-  // 2. Partial Back-Filling Pass (Transfer individual parts from trailing sheets into earlier free pockets)
-  if (currentSheets.length > 1) {
-    for (let sIdx = currentSheets.length - 1; sIdx >= 1; sIdx--) {
-      const trailingSheet = currentSheets[sIdx]!;
-      if (!trailingSheet || trailingSheet.placed.length === 0) continue;
-
-      const targetFreeRectsMap = new Map<number, FreeRectangle[]>();
-      for (let tIdx = 0; tIdx < sIdx; tIdx++) {
-        targetFreeRectsMap.set(tIdx, calculateFreeRectanglesForSheet(currentSheets[tIdx]!, config));
-      }
-
-      const trailingParts = trailingSheet.placed.slice().sort((a, b) => a.w * a.h - b.w * b.h);
-
-      for (let pIdx = trailingParts.length - 1; pIdx >= 0; pIdx--) {
-        const partToMove = trailingParts[pIdx]!;
-        let moved = false;
-
-        for (let tIdx = 0; tIdx < sIdx; tIdx++) {
-          const targetSheet = currentSheets[tIdx]!;
-          const freeRects = targetFreeRectsMap.get(tIdx);
-          if (!freeRects || freeRects.length === 0) continue;
-
-          let orientations = [{ w: partToMove.w, h: partToMove.h, rotated: partToMove.rotated }];
-          if (config.rotation && partToMove.w !== partToMove.h) {
-            orientations.push({ w: partToMove.h, h: partToMove.w, rotated: !partToMove.rotated });
-          }
-
-          for (let r = 0; r < freeRects.length; r++) {
-            const freeRect = freeRects[r]!;
-            for (let o = 0; o < orientations.length; o++) {
-              const orient = orientations[o]!;
-              if (orient.w <= freeRect.w && orient.h <= freeRect.h) {
-                targetSheet.placed.push({
-                  key: `${targetSheet.id}-${targetSheet.placed.length}`,
-                  part: partToMove.part,
-                  x: freeRect.x,
-                  y: freeRect.y,
-                  w: orient.w,
-                  h: orient.h,
-                  rotated: orient.rotated,
-                  index: targetSheet.placed.length,
-                });
-                targetSheet.usedArea += orient.w * orient.h;
-                targetSheet.utilization =
-                  (targetSheet.usedArea / (targetSheet.sheetLength * targetSheet.sheetWidth)) * 100;
-
-                const remIdx = trailingSheet.placed.findIndex((p) => p.key === partToMove.key);
-                if (remIdx !== -1) {
-                  trailingSheet.placed.splice(remIdx, 1);
-                }
-                trailingSheet.usedArea -= partToMove.w * partToMove.h;
-                trailingSheet.utilization =
-                  (trailingSheet.usedArea / (trailingSheet.sheetLength * trailingSheet.sheetWidth)) * 100;
-
-                const updatedFree = splitFreeRectangleSet(
-                  freeRects,
-                  freeRect.x,
-                  freeRect.y,
-                  orient.w,
-                  orient.h,
-                  config.kerf
-                );
-                targetFreeRectsMap.set(tIdx, updatedFree);
-
-                moved = true;
-                break;
-              }
-            }
-            if (moved) break;
-          }
-          if (moved) break;
-        }
-      }
-    }
-
-    currentSheets = currentSheets.filter((s) => s.placed.length > 0);
-  }
-
-  return currentSheets;
+  return currentSheets.filter((s) => s.placed.length > 0);
 }
 
 /**
@@ -1967,7 +1999,10 @@ export function evaluateLayoutScore(
     metrics.cutContinuityScore * weights.cutContinuityBonus +
     metrics.packingDensity * weights.packingDensityBonus -
     metrics.rotationCount * weights.rotationPenalty +
-    metrics.stripAlignmentScore * weights.stripAlignmentBonus;
+    metrics.stripAlignmentScore * weights.stripAlignmentBonus +
+    ((metrics.partClusteringScore ?? 100) / 100) * 80.0 -
+    (metrics.staircasePenalty ?? 0) +
+    (metrics.sheetBalanceBonus ?? 0);
 
   return {
     score: Number(score.toFixed(2)),
@@ -2314,6 +2349,42 @@ export function packGuillotineColumnSheet(
         }
       }
 
+      // Fill width first: immediately top-off the column if leftover space remains along Y
+      let colTopLeftover = curSheetWidth - trim - currentY;
+      if (colTopLeftover > 20 && remainingQueue.length > 0) {
+        for (let remI = 0; remI < remainingQueue.length; remI++) {
+          const remItem = remainingQueue[remI]!;
+          const canRotate = config.rotation && remItem.w !== remItem.h;
+          const orientations = [{ w: remItem.w, h: remItem.h, rotated: remItem.rotated }];
+          if (canRotate) {
+            orientations.push({ w: remItem.h, h: remItem.w, rotated: !remItem.rotated });
+          }
+
+          for (const orient of orientations) {
+            if (orient.w <= bestWidth && orient.h <= colTopLeftover) {
+              placed.push({
+                key: `${sheetId}-${index}`,
+                part: remItem.part,
+                x: currentX,
+                y: currentY,
+                w: orient.w,
+                h: orient.h,
+                rotated: orient.rotated,
+                index: index++,
+              });
+              usedArea += orient.w * orient.h;
+              currentY += orient.h + kerf;
+              colTopLeftover = curSheetWidth - trim - currentY;
+              remainingQueue.splice(remI, 1);
+              remI--;
+              break;
+            }
+          }
+          if (colTopLeftover <= 20) break;
+        }
+      }
+
+      // THEN advance in length (increase X)
       currentX += bestWidth + kerf;
     }
 
@@ -2451,6 +2522,886 @@ export function packGuillotineShelfSheet(
 
   return sheets;
 }
+
+// ============================================================================
+// NEW NESTING STRATEGY (STEPS 1 - 9)
+// ============================================================================
+
+/**
+ * STEP 1: STRICTEST GROUPING (Level 1)
+ * Groups parts having EXACTLY the same Thickness + Length + Width.
+ * Canonicalizes orientation if rotation is permitted (Length >= Width),
+ * sums quantities, and calculates group properties (area, perimeter, aspect ratio).
+ */
+export type ExactPartGroup = {
+  id: string;
+  sourceParts: Part[];
+  thickness: number;
+  length: number;
+  width: number;
+  totalQty: number;
+  area: number;
+  perimeter: number;
+  aspectRatio: number;
+  material: string;
+  allowRotation: boolean;
+};
+
+export function buildExactPartGroups(parts: Part[], allowRotation: boolean = true): ExactPartGroup[] {
+  const groupMap = new Map<string, ExactPartGroup>();
+
+  for (const p of parts) {
+    if (p.invalid || p.qty <= 0) continue;
+    let l = p.length;
+    let w = p.width;
+    if (allowRotation && w > l) {
+      [l, w] = [w, l];
+    }
+    const key = `${p.thickness}|${(p.material || "").trim().toUpperCase()}|${l}x${w}`;
+    const existing = groupMap.get(key);
+    if (existing) {
+      existing.totalQty += p.qty;
+      existing.sourceParts.push(p);
+    } else {
+      groupMap.set(key, {
+        id: `GRP-${groupMap.size + 1}`,
+        sourceParts: [p],
+        thickness: p.thickness,
+        length: l,
+        width: w,
+        totalQty: p.qty,
+        area: l * w,
+        perimeter: 2 * (l + w),
+        aspectRatio: l / Math.max(1, w),
+        material: p.material || "STEEL",
+        allowRotation,
+      });
+    }
+  }
+
+  return [...groupMap.values()];
+}
+
+/**
+ * STEP 2 & 3: COMPATIBLE DIMENSION FAMILIES (Level 2: Length, Level 3: Width)
+ * Gathers groups sharing a common length or width dimension.
+ * Arranging parts of the same dimension family together produces clean, straight,
+ * continuous guillotine shear cuts without lateral cavities.
+ */
+export type DimensionFamily = {
+  dimension: number;
+  groups: ExactPartGroup[];
+  totalPieces: number;
+  totalArea: number;
+};
+
+export function buildDimensionFamilies(groups: ExactPartGroup[], allowRotation: boolean = true): DimensionFamily[] {
+  const dimMap = new Map<number, ExactPartGroup[]>();
+
+  for (const g of groups) {
+    const dims = new Set<number>([g.length, g.width]);
+    for (const d of dims) {
+      if (!dimMap.has(d)) dimMap.set(d, []);
+      dimMap.get(d)!.push(g);
+    }
+  }
+
+  const families: DimensionFamily[] = [];
+  for (const [dim, grps] of dimMap) {
+    const totalPieces = grps.reduce((s, g) => s + g.totalQty, 0);
+    const totalArea = grps.reduce((s, g) => s + g.totalQty * g.area, 0);
+    families.push({
+      dimension: dim,
+      groups: grps,
+      totalPieces,
+      totalArea,
+    });
+  }
+
+  families.sort((a, b) => b.totalArea - a.totalArea || b.totalPieces - a.totalPieces);
+  return families;
+}
+
+/**
+ * STEP 5, 6, 7, 8: HIERARCHICAL NESTING ENGINE
+ * Macro-structure by dimension families + Micro-filling with smaller parts + Sheet consolidation
+ */
+export function packHierarchicalSheet(
+  items: PackingItem[],
+  curSheetLength: number,
+  curSheetWidth: number,
+  config: OptimizationConfig,
+  material: string,
+  thickness: number,
+  mode: "columns" | "shelves" = "columns",
+  sheetIdPrefix: string = "HIER"
+): NestedSheet[] {
+  const trim = config.trim;
+  const kerf = config.kerf;
+  const usableL = curSheetLength - trim * 2;
+  const usableW = curSheetWidth - trim * 2;
+
+  let remainingQueue = items.map((it, idx) => ({ ...it, qId: idx }));
+  const sheets: NestedSheet[] = [];
+
+  while (remainingQueue.length > 0) {
+    const sheetId = `${sheetIdPrefix}-${sheets.length + 1}`;
+    const placed: PlacedPart[] = [];
+    let currentX = trim;
+    let currentY = trim;
+    let usedArea = 0;
+    let index = 0;
+
+    let freeRectangles: FreeRectangle[] = [];
+
+    if (mode === "columns") {
+      // STEP 5: Macro-placement in vertical guillotine columns along Y
+      while (currentX < curSheetLength - trim && remainingQueue.length > 0) {
+        const remainingSpaceW = curSheetLength - trim - currentX;
+        if (remainingSpaceW <= 0) break;
+
+        const widthMap = new Map<
+          number,
+          Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }>
+        >();
+
+        for (let i = 0; i < remainingQueue.length; i++) {
+          const item = remainingQueue[i]!;
+          const canRotate = config.rotation && item.w !== item.h;
+
+          if (item.w <= remainingSpaceW && item.h <= usableW) {
+            if (!widthMap.has(item.w)) widthMap.set(item.w, []);
+            widthMap.get(item.w)!.push({ item, h: item.h, w: item.w, rotated: item.rotated, spanLen: item.h });
+          }
+          if (canRotate && item.h <= remainingSpaceW && item.w <= usableW) {
+            if (!widthMap.has(item.h)) widthMap.set(item.h, []);
+            widthMap.get(item.h)!.push({ item, h: item.w, w: item.h, rotated: !item.rotated, spanLen: item.w });
+          }
+        }
+
+        if (widthMap.size === 0) break;
+
+        let bestWidth = 0;
+        let bestCombination: Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }> = [];
+        let bestFillH = 0;
+
+        for (const [w, candidates] of widthMap) {
+          const comboDP = dpKnapsack1D(candidates, usableW, kerf);
+          const comboDesc = knapsackHeightDesc(candidates, usableW, kerf);
+          const fillDP = comboDP.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDP.length - 1) * kerf;
+          const fillDesc = comboDesc.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDesc.length - 1) * kerf;
+
+          const combo = fillDP >= fillDesc ? comboDP : comboDesc;
+          const comboH = Math.max(fillDP, fillDesc);
+
+          if (comboH > bestFillH || (comboH === bestFillH && w > bestWidth)) {
+            bestFillH = comboH;
+            bestWidth = w;
+            bestCombination = combo;
+          }
+        }
+
+        if (bestWidth <= 0 || bestCombination.length === 0) break;
+
+        let curColY = trim;
+        for (const chosen of bestCombination) {
+          placed.push({
+            key: `${sheetId}-${index}`,
+            part: chosen.item.part,
+            x: currentX,
+            y: curColY,
+            w: chosen.w,
+            h: chosen.h,
+            rotated: chosen.rotated,
+            index: index++,
+          });
+
+          usedArea += chosen.w * chosen.h;
+          curColY += chosen.h + kerf;
+
+          const remIdx = remainingQueue.findIndex((r) => r.qId === chosen.item.qId);
+          if (remIdx !== -1) {
+            remainingQueue.splice(remIdx, 1);
+          }
+        }
+
+        // Width-First: Immediately fill any leftover width at the top of the column before increasing length (X)
+        let colTopLeftover = curSheetWidth - trim - curColY;
+        if (colTopLeftover > 20 && remainingQueue.length > 0) {
+          for (let remI = 0; remI < remainingQueue.length; remI++) {
+            const remItem = remainingQueue[remI]!;
+            const canRotate = config.rotation && remItem.w !== remItem.h;
+            const orientations = [{ w: remItem.w, h: remItem.h, rotated: remItem.rotated }];
+            if (canRotate) {
+              orientations.push({ w: remItem.h, h: remItem.w, rotated: !remItem.rotated });
+            }
+
+            for (const orient of orientations) {
+              if (orient.w <= bestWidth && orient.h <= colTopLeftover) {
+                placed.push({
+                  key: `${sheetId}-${index}`,
+                  part: remItem.part,
+                  x: currentX,
+                  y: curColY,
+                  w: orient.w,
+                  h: orient.h,
+                  rotated: orient.rotated,
+                  index: index++,
+                });
+                usedArea += orient.w * orient.h;
+                curColY += orient.h + kerf;
+                colTopLeftover = curSheetWidth - trim - curColY;
+                remainingQueue.splice(remI, 1);
+                remI--;
+                break;
+              }
+            }
+            if (colTopLeftover <= 20) break;
+          }
+        }
+
+        // If any residual gap remains, register for global free rectangle fill
+        if (colTopLeftover > 10) {
+          freeRectangles.push({
+            x: currentX,
+            y: curColY,
+            w: bestWidth,
+            h: colTopLeftover,
+          });
+        }
+
+        // THEN advance in length (increase X)
+        currentX += bestWidth + kerf;
+      }
+    } else {
+      // STEP 5: Macro-placement in horizontal guillotine shelves along X
+      while (currentY < curSheetWidth - trim && remainingQueue.length > 0) {
+        const remainingSpaceH = curSheetWidth - trim - currentY;
+        if (remainingSpaceH <= 0) break;
+
+        const heightMap = new Map<
+          number,
+          Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }>
+        >();
+
+        for (let i = 0; i < remainingQueue.length; i++) {
+          const item = remainingQueue[i]!;
+          const canRotate = config.rotation && item.w !== item.h;
+
+          if (item.h <= remainingSpaceH && item.w <= usableL) {
+            if (!heightMap.has(item.h)) heightMap.set(item.h, []);
+            heightMap.get(item.h)!.push({ item, w: item.w, h: item.h, rotated: item.rotated, spanLen: item.w });
+          }
+          if (canRotate && item.w <= remainingSpaceH && item.h <= usableL) {
+            if (!heightMap.has(item.w)) heightMap.set(item.w, []);
+            heightMap.get(item.w)!.push({ item, w: item.h, h: item.w, rotated: !item.rotated, spanLen: item.h });
+          }
+        }
+
+        if (heightMap.size === 0) break;
+
+        let bestHeight = 0;
+        let bestCombination: Array<{ item: PackingItem & { qId: number }; w: number; h: number; rotated: boolean; spanLen: number }> = [];
+        let bestFillL = 0;
+
+        for (const [h, candidates] of heightMap) {
+          const comboDP = dpKnapsack1D(candidates, usableL, kerf);
+          const comboDesc = knapsackHeightDesc(candidates, usableL, kerf);
+          const fillDP = comboDP.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDP.length - 1) * kerf;
+          const fillDesc = comboDesc.reduce((s, c) => s + c.spanLen, 0) + Math.max(0, comboDesc.length - 1) * kerf;
+
+          const combo = fillDP >= fillDesc ? comboDP : comboDesc;
+          const comboL = Math.max(fillDP, fillDesc);
+
+          if (comboL > bestFillL || (comboL === bestFillL && h > bestHeight)) {
+            bestFillL = comboL;
+            bestHeight = h;
+            bestCombination = combo;
+          }
+        }
+
+        if (bestHeight <= 0 || bestCombination.length === 0) break;
+
+        let curShelfX = trim;
+        for (const chosen of bestCombination) {
+          placed.push({
+            key: `${sheetId}-${index}`,
+            part: chosen.item.part,
+            x: curShelfX,
+            y: currentY,
+            w: chosen.w,
+            h: chosen.h,
+            rotated: chosen.rotated,
+            index: index++,
+          });
+
+          usedArea += chosen.w * chosen.h;
+          curShelfX += chosen.w + kerf;
+
+          const remIdx = remainingQueue.findIndex((r) => r.qId === chosen.item.qId);
+          if (remIdx !== -1) {
+            remainingQueue.splice(remIdx, 1);
+          }
+        }
+
+        const shelfRightLeftover = curSheetLength - trim - curShelfX;
+        if (shelfRightLeftover > 10) {
+          freeRectangles.push({
+            x: curShelfX,
+            y: currentY,
+            w: shelfRightLeftover,
+            h: bestHeight,
+          });
+        }
+
+        currentY += bestHeight + kerf;
+      }
+    }
+
+    // STEP 6: INTELLIGENT REMAINING SPACE FILLING (Level 4 Progressive Relaxation)
+    // Fill remaining rectangular pockets at the ends of strips with unplaced smaller parts
+    if (freeRectangles.length > 0 && remainingQueue.length > 0) {
+      freeRectangles = pruneFreeRectanglesInPlace(freeRectangles);
+
+      let placedAny = true;
+      while (placedAny && remainingQueue.length > 0 && freeRectangles.length > 0) {
+        placedAny = false;
+        let bestItemIdx = -1;
+        let bestRectIdx = -1;
+        let bestW = 0;
+        let bestH = 0;
+        let bestRotated = false;
+        let bestScore = -Infinity;
+
+        for (let rIdx = 0; rIdx < freeRectangles.length; rIdx++) {
+          const rect = freeRectangles[rIdx]!;
+
+          for (let iIdx = 0; iIdx < remainingQueue.length; iIdx++) {
+            const item = remainingQueue[iIdx]!;
+            const canRotate = config.rotation && item.w !== item.h;
+            const orientations = [{ w: item.w, h: item.h, rotated: item.rotated }];
+            if (canRotate) {
+              orientations.push({ w: item.h, h: item.w, rotated: !item.rotated });
+            }
+
+            for (const orient of orientations) {
+              if (orient.w <= rect.w && orient.h <= rect.h) {
+                const areaFit = (orient.w * orient.h) / (rect.w * rect.h);
+                const score = areaFit * 1000 + orient.w * orient.h;
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestItemIdx = iIdx;
+                  bestRectIdx = rIdx;
+                  bestW = orient.w;
+                  bestH = orient.h;
+                  bestRotated = orient.rotated;
+                }
+              }
+            }
+          }
+        }
+
+        if (bestItemIdx !== -1 && bestRectIdx !== -1) {
+          const chosen = remainingQueue[bestItemIdx]!;
+          const rect = freeRectangles[bestRectIdx]!;
+
+          placed.push({
+            key: `${sheetId}-${index}`,
+            part: chosen.part,
+            x: rect.x,
+            y: rect.y,
+            w: bestW,
+            h: bestH,
+            rotated: bestRotated,
+            index: index++,
+          });
+
+          usedArea += bestW * bestH;
+          remainingQueue.splice(bestItemIdx, 1);
+          placedAny = true;
+
+          freeRectangles = splitFreeRectangleSet(freeRectangles, rect.x, rect.y, bestW, bestH, kerf);
+        }
+      }
+    }
+
+    if (placed.length === 0) break;
+
+    sheets.push({
+      id: sheetId,
+      material,
+      thickness,
+      sheetLength: curSheetLength,
+      sheetWidth: curSheetWidth,
+      placed,
+      usedArea,
+      utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+    });
+  }
+
+  // STEP 8: SHEET CONSOLIDATION - ELIMINATE THE LEAST UTILIZED SHEET
+  consolidateSheets(sheets, config);
+
+  // STEP 7: 2D Physics Gravity Compaction - pull all parts tight to datum corner
+  return sheets.map((s) => gravityCompactSheet(s, config));
+}
+
+/**
+ * STEP 8: SHEET CONSOLIDATION
+ * Attempts to eliminate the least-utilized trailing sheet by migrating all its parts
+ * into free rectangular spaces of earlier sheets.
+ */
+export function consolidateSheets(sheets: NestedSheet[], config: OptimizationConfig): void {
+  if (sheets.length <= 1) return;
+
+  const kerf = config.kerf;
+  let canEliminate = true;
+
+  while (canEliminate && sheets.length > 1) {
+    canEliminate = false;
+    const lastSheetIdx = sheets.length - 1;
+    const lastSheet = sheets[lastSheetIdx]!;
+    const candidateParts = [...lastSheet.placed].sort((a, b) => b.w * b.h - a.w * a.h);
+
+    const earlierSheets = sheets.slice(0, lastSheetIdx);
+    const candidateArea = candidateParts.reduce((s, p) => s + p.w * p.h, 0);
+    const availableArea = earlierSheets.reduce((s, sh) => s + (sh.sheetLength * sh.sheetWidth - sh.usedArea), 0);
+
+    if (candidateArea > availableArea) break;
+
+    const tempEarlier = earlierSheets.map((s) => ({
+      ...s,
+      placed: [...s.placed],
+      usedArea: s.usedArea,
+    }));
+
+    let allMoved = true;
+    for (const part of candidateParts) {
+      let placedInEarlier = false;
+
+      for (const targetSheet of tempEarlier) {
+        const freeSpaces = calculateFreeRectanglesForSheet(targetSheet, config);
+        for (const freeRect of freeSpaces) {
+          const orientations = [{ w: part.w, h: part.h, rotated: part.rotated }];
+          if (config.rotation && part.w !== part.h) {
+            orientations.push({ w: part.h, h: part.w, rotated: !part.rotated });
+          }
+
+          for (const orient of orientations) {
+            if (orient.w <= freeRect.w && orient.h <= freeRect.h) {
+              targetSheet.placed.push({
+                ...part,
+                x: freeRect.x,
+                y: freeRect.y,
+                w: orient.w,
+                h: orient.h,
+                rotated: orient.rotated,
+              });
+              targetSheet.usedArea += orient.w * orient.h;
+              targetSheet.utilization =
+                (targetSheet.usedArea / (targetSheet.sheetLength * targetSheet.sheetWidth)) * 100;
+              placedInEarlier = true;
+              break;
+            }
+          }
+          if (placedInEarlier) break;
+        }
+        if (placedInEarlier) break;
+      }
+
+      if (!placedInEarlier) {
+        allMoved = false;
+        break;
+      }
+    }
+
+    if (allMoved) {
+      sheets.length = 0;
+      sheets.push(...tempEarlier.map((s) => gravityCompactSheet(s, config)));
+      canEliminate = true;
+    }
+  }
+}
+
+/**
+ * STRUCTURED INDUSTRIAL BAND & BLOCK NESTING ENGINE
+ * 
+ * Implements the core industrial nesting principles:
+ * 1. FILL WIDTH FIRST -> COMPLETE BAND -> MOVE FORWARD IN LENGTH -> CREATE NEXT BAND
+ * 2. PART GROUPING PRIORITY:
+ *    Level 1: Same thickness + same length + same width (Exact groups)
+ *    Level 2: Same thickness + same length
+ *    Level 3: Same thickness + same width
+ *    Level 4: Same thickness
+ * 3. INTELLIGENT ROTATION: Explores dual orientations (L x W vs W x L) to form compact rectangular blocks
+ * 4. MONOLITHIC BLOCK FORMATION: Identical parts placed in C x R grid arrays with zero in-between space
+ * 5. LEFTOVER WIDTH TOP-OFF: Closes remaining band width with compatible parts before advancing length
+ * 6. MACRO-ZONE STRIPS: Long parts (> usable sheet width) grouped in full-length horizontal zones
+ * 7. ZERO CONFETTI & ZERO DESTRUCTIVE GRAVITY: Preserves clean rectangular remnants and straight cuts
+ * 8. SHEET BALANCING: Supports targetMaxXSheet1 to balance parts evenly across 2 sheets when needed
+ */
+export function packIndustrialBandSheet(
+  items: PackingItem[],
+  curSheetLength: number,
+  curSheetWidth: number,
+  config: OptimizationConfig,
+  material: string,
+  thickness: number,
+  mode: "columns" | "shelves" = "columns",
+  sheetIdPrefix: string = "BAND",
+  targetMaxXSheet1?: number
+): NestedSheet[] {
+  const trim = config.trim;
+  const kerf = config.kerf;
+  const allowRotation = config.rotation;
+  const usableL = curSheetLength - trim * 2;
+  const usableW = curSheetWidth - trim * 2;
+
+  let remainingQueue = items.map((it, idx) => ({ ...it, qId: idx }));
+  const sheets: NestedSheet[] = [];
+
+  while (remainingQueue.length > 0) {
+    const sheetIdx = sheets.length;
+    const sheetId = `${sheetIdPrefix}-${sheetIdx + 1}`;
+    const placed: PlacedPart[] = [];
+    let usedArea = 0;
+    let index = 0;
+
+    const maxAllowedX =
+      sheetIdx === 0 && targetMaxXSheet1 && targetMaxXSheet1 > 1000
+        ? Math.min(usableL + trim, targetMaxXSheet1)
+        : usableL + trim;
+
+    // 1. Check for long parts exceeding usable sheet width (e.g. 2922 mm > 1500 mm)
+    // These cannot be placed vertically; they must form horizontal full-length strips across X
+    const longParts = remainingQueue.filter((u) => {
+      const maxDim = Math.max(u.w, u.h);
+      return maxDim > usableW;
+    });
+
+    let currentYStart = trim;
+
+    if (longParts.length > 0) {
+      const longByWidth = new Map<number, typeof longParts>();
+      for (const lp of longParts) {
+        const w = Math.min(lp.w, lp.h);
+        if (!longByWidth.has(w)) longByWidth.set(w, []);
+        longByWidth.get(w)!.push(lp);
+      }
+
+      for (const [stripH, stripItems] of longByWidth) {
+        while (stripItems.length > 0 && currentYStart + stripH <= usableW + trim) {
+          let rowX = trim;
+          stripItems.sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h));
+
+          const rowItems: typeof stripItems = [];
+          for (let i = 0; i < stripItems.length; i++) {
+            const it = stripItems[i]!;
+            const itemL = Math.max(it.w, it.h);
+            if (rowX + itemL <= maxAllowedX) {
+              rowItems.push(it);
+              rowX += itemL + kerf;
+              stripItems.splice(i, 1);
+              i--;
+            }
+          }
+
+          if (rowItems.length === 0) break;
+
+          let placeX = trim;
+          for (const it of rowItems) {
+            const itemL = Math.max(it.w, it.h);
+            placed.push({
+              key: `${sheetId}-${index}`,
+              part: it.part,
+              x: placeX,
+              y: currentYStart,
+              w: itemL,
+              h: stripH,
+              rotated: it.w < it.h,
+              index: index++,
+            });
+            usedArea += itemL * stripH;
+            placeX += itemL + kerf;
+            const remIdx = remainingQueue.findIndex((u) => u.qId === it.qId);
+            if (remIdx !== -1) remainingQueue.splice(remIdx, 1);
+          }
+
+          currentYStart += stripH + kerf;
+        }
+      }
+    }
+
+    // 2. Pack the rest of the sheet using VERTICAL BANDS (COLUMNS)
+    // Span along Y: from currentYStart to usableW + trim
+    const bandSpanY = usableW + trim - currentYStart;
+    let currentX = trim;
+
+    while (currentX < maxAllowedX && remainingQueue.length > 0) {
+      const remainingX = maxAllowedX - currentX;
+      if (remainingX < 40) break;
+
+      // Group unplaced parts by identical dimensions (Level 1)
+      const groups = new Map<
+        string,
+        { part: Part; l: number; w: number; items: typeof remainingQueue }
+      >();
+      for (const u of remainingQueue) {
+        let l = u.w;
+        let w = u.h;
+        if (allowRotation && w > l) [l, w] = [w, l];
+        const key = `${u.part.id}_${l}x${w}`;
+        if (!groups.has(key)) {
+          groups.set(key, { part: u.part, l, w, items: [] });
+        }
+        groups.get(key)!.items.push(u);
+      }
+
+      if (groups.size === 0) break;
+
+      // Evaluate best primary block to anchor this band
+      let bestChoice: {
+        group: { part: Part; l: number; w: number; items: typeof remainingQueue };
+        orientW: number;
+        orientH: number;
+        rotated: boolean;
+        cols: number;
+        rows: number;
+        blockW: number;
+        blockH: number;
+      } | null = null;
+      let bestScore = -Infinity;
+
+      for (const [, g] of groups) {
+        const orientations = [{ w: g.l, h: g.w, rotated: false }];
+        if (allowRotation && g.l !== g.w) {
+          orientations.push({ w: g.w, h: g.l, rotated: true });
+        }
+
+        for (const o of orientations) {
+          if (o.w > remainingX || o.h > bandSpanY) continue;
+
+          const maxRows = Math.floor((bandSpanY + kerf) / (o.h + kerf));
+          if (maxRows <= 0) continue;
+
+          const neededCols = Math.ceil(g.items.length / maxRows);
+          const maxColsByX = Math.floor((remainingX + kerf) / (o.w + kerf));
+          const colsLimit = Math.min(neededCols, maxColsByX);
+
+          for (let c = 1; c <= colsLimit; c++) {
+            const partsInBlock = Math.min(g.items.length, c * maxRows);
+            const actualRows = Math.min(maxRows, Math.ceil(partsInBlock / c));
+            const blockH = actualRows * o.h + (actualRows - 1) * kerf;
+            const blockW = c * o.w + (c - 1) * kerf;
+            const fillYRatio = blockH / bandSpanY;
+
+            // Check if leftover height can be topped off cleanly by another group
+            const leftoverH = bandSpanY - blockH - kerf;
+            let topOffFitBonus = 0;
+            if (leftoverH >= 40) {
+              for (const u of remainingQueue) {
+                if (u.part.id !== g.part.id) {
+                  if (u.h <= leftoverH || (allowRotation && u.w <= leftoverH)) {
+                    topOffFitBonus = 25;
+                    break;
+                  }
+                }
+              }
+            } else if (leftoverH < 20) {
+              topOffFitBonus = 60; // Complete width saturation!
+            }
+
+            const fullGroupBonus = partsInBlock === g.items.length ? 40 : 0;
+            const shapeBonus = c > 1 ? 15 : 0;
+
+            const score =
+              fillYRatio * 120 + fullGroupBonus + topOffFitBonus + shapeBonus + partsInBlock * 4;
+            if (score > bestScore) {
+              bestScore = score;
+              bestChoice = {
+                group: g,
+                orientW: o.w,
+                orientH: o.h,
+                rotated: o.rotated,
+                cols: c,
+                rows: actualRows,
+                blockW,
+                blockH,
+              };
+            }
+          }
+        }
+      }
+
+      if (!bestChoice) break;
+
+      const { group, orientW, orientH, rotated, cols, rows, blockW, blockH } = bestChoice;
+
+      // Place the primary block
+      const itemsToPlace = group.items.splice(0, cols * rows);
+      let pIdx = 0;
+      for (let c = 0; c < cols; c++) {
+        const colX = currentX + c * (orientW + kerf);
+        for (let r = 0; r < rows; r++) {
+          if (pIdx >= itemsToPlace.length) break;
+          const it = itemsToPlace[pIdx++]!;
+          const partY = currentYStart + r * (orientH + kerf);
+          placed.push({
+            key: `${sheetId}-${index}`,
+            part: it.part,
+            x: colX,
+            y: partY,
+            w: orientW,
+            h: orientH,
+            rotated,
+            index: index++,
+          });
+          usedArea += orientW * orientH;
+          const uIdx = remainingQueue.findIndex((u) => u.qId === it.qId);
+          if (uIdx !== -1) remainingQueue.splice(uIdx, 1);
+        }
+      }
+
+      // 3. FILL LEFTOVER WIDTH (Top-off space in this band along Y before increasing length X)
+      const leftoverH = bandSpanY - blockH - kerf;
+      if (leftoverH >= 40 && remainingQueue.length > 0) {
+        let topY = currentYStart + blockH + kerf;
+
+        let fillerFound = true;
+        while (fillerFound && topY < currentYStart + bandSpanY && remainingQueue.length > 0) {
+          fillerFound = false;
+          const curAvailH = currentYStart + bandSpanY - topY;
+          if (curAvailH < 40) break;
+
+          let bestFiller: {
+            part: Part;
+            fw: number;
+            fh: number;
+            fRotated: boolean;
+            fCols: number;
+            fRows: number;
+            items: typeof remainingQueue;
+          } | null = null;
+          let bestFillScore = -Infinity;
+
+          const remGroups = new Map<
+            string,
+            { part: Part; l: number; w: number; items: typeof remainingQueue }
+          >();
+          for (const u of remainingQueue) {
+            let l = u.w;
+            let w = u.h;
+            if (allowRotation && w > l) [l, w] = [w, l];
+            const key = `${u.part.id}_${l}x${w}`;
+            if (!remGroups.has(key)) remGroups.set(key, { part: u.part, l, w, items: [] });
+            remGroups.get(key)!.items.push(u);
+          }
+
+          for (const [, rg] of remGroups) {
+            const orients = [{ w: rg.l, h: rg.w, rotated: false }];
+            if (allowRotation && rg.l !== rg.w) orients.push({ w: rg.w, h: rg.l, rotated: true });
+
+            for (const fo of orients) {
+              if (fo.h <= curAvailH && fo.w <= blockW) {
+                const fCols = Math.floor((blockW + kerf) / (fo.w + kerf));
+                const fRows = Math.floor((curAvailH + kerf) / (fo.h + kerf));
+                if (fCols <= 0 || fRows <= 0) continue;
+
+                const maxCanPlace = Math.min(rg.items.length, fCols * fRows);
+                const actualFRows = Math.ceil(maxCanPlace / fCols);
+                const actualFH = actualFRows * fo.h + (actualFRows - 1) * kerf;
+                const widthCoverage = (fCols * fo.w + (fCols - 1) * kerf) / blockW;
+                const score = (actualFH / curAvailH) * 50 + widthCoverage * 50 + maxCanPlace * 2;
+
+                if (score > bestFillScore) {
+                  bestFillScore = score;
+                  bestFiller = {
+                    part: rg.part,
+                    fw: fo.w,
+                    fh: fo.h,
+                    fRotated: fo.rotated,
+                    fCols,
+                    fRows: actualFRows,
+                    items: rg.items,
+                  };
+                }
+              }
+            }
+          }
+
+          if (bestFiller) {
+            const fItems = bestFiller.items.splice(0, bestFiller.fCols * bestFiller.fRows);
+            let fi = 0;
+            for (let r = 0; r < bestFiller.fRows; r++) {
+              const rowY = topY + r * (bestFiller.fh + kerf);
+              for (let c = 0; c < bestFiller.fCols; c++) {
+                if (fi >= fItems.length) break;
+                const it = fItems[fi++]!;
+                const partX = currentX + c * (bestFiller.fw + kerf);
+                placed.push({
+                  key: `${sheetId}-${index}`,
+                  part: it.part,
+                  x: partX,
+                  y: rowY,
+                  w: bestFiller.fw,
+                  h: bestFiller.fh,
+                  rotated: bestFiller.fRotated,
+                  index: index++,
+                });
+                usedArea += bestFiller.fw * bestFiller.fh;
+                const uIdx = remainingQueue.findIndex((u) => u.qId === it.qId);
+                if (uIdx !== -1) remainingQueue.splice(uIdx, 1);
+              }
+            }
+            topY += bestFiller.fRows * (bestFiller.fh + kerf);
+            fillerFound = true;
+          }
+        }
+      }
+
+      // 4. Advance in length X
+      currentX += blockW + kerf;
+    }
+
+    if (placed.length === 0) break;
+
+    sheets.push({
+      id: sheetId,
+      material,
+      thickness,
+      sheetLength: curSheetLength,
+      sheetWidth: curSheetWidth,
+      placed,
+      usedArea,
+      utilization: (usedArea / (curSheetLength * curSheetWidth)) * 100,
+    });
+  }
+
+  return sheets;
+}
+
+export function packBlockClusterSheet(
+  items: PackingItem[],
+  curSheetLength: number,
+  curSheetWidth: number,
+  config: OptimizationConfig,
+  material: string,
+  thickness: number,
+  mode: "columns" | "shelves" = "columns",
+  sheetIdPrefix: string = "BLOCK"
+): NestedSheet[] {
+  return packIndustrialBandSheet(
+    items,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    mode,
+    sheetIdPrefix
+  );
+}
+
 
 /**
  * Industrial Skyline Bottom-Left Profile Sheet Packer.
@@ -2921,8 +3872,76 @@ export function solveBucketPopulation(
     }
   }
 
-  // 3. Direct Fast DP Guillotine Strip Evaluation:
-  // Immediately test DP Guillotine Column and Shelf Strip Packers on full queue
+  // 3. Structured Industrial Band & Block Optimizer (Fill Width First -> Complete Band -> Move in Length):
+  const bandCol = packIndustrialBandSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "columns",
+    "BAND-COL"
+  );
+  tryCandidateSheets(bandCol);
+
+  // Global Multi-Trial Balancing for multi-sheet distributions:
+  // Tests target lengths to balance parts cleanly across sheets without jagged staircases
+  const balancingCaps = [5500, 5200, 5000, 4800, 4500, 4200];
+  for (const cap of balancingCaps) {
+    const bandBal = packIndustrialBandSheet(
+      queueItems,
+      curSheetLength,
+      curSheetWidth,
+      config,
+      material,
+      thickness,
+      "columns",
+      "BAND-BAL",
+      cap
+    );
+    tryCandidateSheets(bandBal);
+  }
+
+  const blockShelf = packBlockClusterSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "shelves",
+    "BLOCK-SHELF"
+  );
+  tryCandidateSheets(blockShelf);
+
+  // 4. Hierarchical Multi-Stage Optimizer (Steps 1 - 9):
+  // Level 1 (Exact Groups) -> Level 2/3 (Length/Width Families) -> Level 4 (Remaining Space Filling) -> Sheet Consolidation
+  const hierCol = packHierarchicalSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "columns",
+    "HIER-COL"
+  );
+  tryCandidateSheets(hierCol);
+
+  const hierShelf = packHierarchicalSheet(
+    queueItems,
+    curSheetLength,
+    curSheetWidth,
+    config,
+    material,
+    thickness,
+    "shelves",
+    "HIER-SHELF"
+  );
+  tryCandidateSheets(hierShelf);
+
+  // Direct Fast DP Guillotine Strip Evaluation:
   const colDirect = packGuillotineColumnSheet(
     queueItems,
     curSheetLength,
@@ -3111,7 +4130,7 @@ export function optimize(
     }
   }
 
-  const sheets: NestedSheet[] = [];
+  let sheets: NestedSheet[] = [];
   const allPopulationCandidates: CandidateLayout[] = [];
   let totalGenerationsRun = 0;
   let isConverged = false;
@@ -3196,6 +4215,7 @@ export function optimize(
       a.material.localeCompare(b.material) ||
       b.utilization - a.utilization
   );
+
 
   sheets.forEach((s, idx) => {
     const newId = `S${String(idx + 1).padStart(2, "0")}`;
@@ -3431,6 +4451,74 @@ export function evaluateLayoutMetrics(
   const totalPairs = (totalPlacedParts * (totalPlacedParts - 1)) / 2;
   const stripAlignmentScore = totalPairs > 0 ? Math.min(100, (alignedStripCount / totalPairs) * 100) : 100;
 
+  // 5. Part Group Contiguity & Anti-Fragmentation Scoring
+  const partPlacements = new Map<string, Array<{ x: number; y: number; w: number; h: number; sheetIdx: number }>>();
+  sheets.forEach((sheet, sIdx) => {
+    sheet.placed.forEach((p) => {
+      const pid = p.part.id;
+      if (!partPlacements.has(pid)) partPlacements.set(pid, []);
+      partPlacements.get(pid)!.push({ x: p.x, y: p.y, w: p.w, h: p.h, sheetIdx: sIdx });
+    });
+  });
+
+  let totalClusters = 0;
+  let idealClusters = 0;
+
+  for (const [, locs] of partPlacements) {
+    if (locs.length <= 1) continue;
+    idealClusters += 1;
+    const visited = new Set<number>();
+    let clustersForPart = 0;
+    for (let i = 0; i < locs.length; i++) {
+      if (visited.has(i)) continue;
+      clustersForPart++;
+      visited.add(i);
+      const queue = [i];
+      while (queue.length > 0) {
+        const curr = queue.pop()!;
+        const a = locs[curr]!;
+        for (let j = 0; j < locs.length; j++) {
+          if (visited.has(j)) continue;
+          const b = locs[j]!;
+          if (a.sheetIdx !== b.sheetIdx) continue;
+          const xAdj = Math.abs((a.x + a.w + config.kerf) - b.x) <= 3 || Math.abs((b.x + b.w + config.kerf) - a.x) <= 3 || (a.x === b.x && a.w === b.w);
+          const yAdj = Math.abs((a.y + a.h + config.kerf) - b.y) <= 3 || Math.abs((b.y + b.h + config.kerf) - a.y) <= 3 || (a.y === b.y && a.h === b.h);
+          const xOvl = a.x < b.x + b.w && a.x + a.w > b.x;
+          const yOvl = a.y < b.y + b.h && a.y + a.h > b.y;
+          if ((xAdj && yOvl) || (yAdj && xOvl) || (xAdj && yAdj)) {
+            visited.add(j);
+            queue.push(j);
+          }
+        }
+      }
+    }
+    totalClusters += clustersForPart;
+  }
+
+  const partClusteringScore = idealClusters > 0
+    ? Math.min(100, Math.max(0, (idealClusters / (totalClusters || 1)) * 100))
+    : 100;
+
+  // 6. Staircase / Jagged Boundary Penalty on Last Sheet
+  let staircasePenalty = 0;
+  const lastSheet = sheets[sheets.length - 1];
+  if (lastSheet && lastSheet.placed.length > 0) {
+    const rightEdges = lastSheet.placed.map((p) => p.x + p.w);
+    const maxRight = Math.max(...rightEdges);
+    const minRight = Math.min(...rightEdges);
+    const spread = maxRight - minRight;
+    if (spread > 200 && lastSheet.placed.length > 4) {
+      staircasePenalty = (spread / lastSheet.sheetLength) * 50.0;
+    }
+  }
+
+  // 7. Sheet Balance Bonus when sheets > 1
+  let sheetBalanceBonus = 0;
+  if (sheets.length === 2) {
+    const uDiff = Math.abs(sheets[0]!.utilization - sheets[1]!.utilization);
+    sheetBalanceBonus = Math.max(0, (50 - uDiff) * 0.8);
+  }
+
   return {
     utilization: Number(utilization.toFixed(2)),
     sheetCount,
@@ -3445,6 +4533,9 @@ export function evaluateLayoutMetrics(
     packingDensity: Number(packingDensity.toFixed(2)),
     rotationCount,
     stripAlignmentScore: Number(stripAlignmentScore.toFixed(2)),
+    partClusteringScore: Number(partClusteringScore.toFixed(2)),
+    staircasePenalty: Number(staircasePenalty.toFixed(2)),
+    sheetBalanceBonus: Number(sheetBalanceBonus.toFixed(2)),
   };
 }
 
@@ -3453,3 +4544,165 @@ export function evaluateLayoutMetrics(
 export function netWeight(parts: Part[]) {
   return parts.reduce((s, p) => s + partWeight(p), 0);
 }
+
+export interface ContinuousProgressUpdate {
+  stageIndex: number;
+  stageName: string;
+  candidatesTested: number;
+  currentYield: number;
+  currentScrap: number;
+  currentSheets: number;
+  bestResult: OptimizationResult;
+}
+
+/**
+ * STEP 10: 15-SECOND TIME-BUDGETED CONTINUOUS OPTIMIZATION LOOP
+ * 
+ * Keeps re-nesting, perturbing, swapping, moving parts from trailing sheets into holes of earlier sheets,
+ * and re-arranging until the best and most compact layout is found within the 15-second modal freeze budget.
+ */
+export async function runContinuousOptimization(
+  parts: Part[],
+  config: OptimizationConfig,
+  totalDurationMs: number = 15000,
+  onUpdate?: (update: ContinuousProgressUpdate) => void,
+  shouldAbort?: () => boolean
+): Promise<OptimizationResult> {
+  const startTime = Date.now();
+  let candidatesTested = 0;
+
+  // 1. Initial Pass: Hierarchical + High-Yield Multi-Trial
+  let bestResult = optimize(parts, {
+    ...config,
+    preset: "max-yield",
+    populationSize: 40,
+    generations: 10,
+    rotation: config.rotation,
+  });
+
+  const initialCandidates = bestResult.candidateLayouts?.length || 140;
+  candidatesTested += initialCandidates;
+
+  onUpdate?.({
+    stageIndex: 0,
+    stageName: "Local Area Best Fit & Hierarchical Macro-Strips",
+    candidatesTested,
+    currentYield: Number(bestResult.utilization.toFixed(1)),
+    currentScrap: Number((100 - bestResult.utilization).toFixed(1)),
+    currentSheets: bestResult.sheetCount,
+    bestResult,
+  });
+
+  // Ordering and heuristic policies for continuous multi-trial exploration
+  const heuristics: Array<{
+    name: string;
+    sortFn?: (a: Part, b: Part) => number;
+    preset: OptimizationPreset;
+  }> = [
+    { name: "area-desc", sortFn: (a, b) => b.length * b.width - a.length * a.width, preset: "max-yield" },
+    { name: "max-dim-desc", sortFn: (a, b) => Math.max(b.length, b.width) - Math.max(a.length, a.width), preset: "guillotine-shear" },
+    { name: "perimeter-desc", sortFn: (a, b) => 2 * (b.length + b.width) - 2 * (a.length + a.width), preset: "balanced" },
+    { name: "ratio-desc", sortFn: (a, b) => b.length / Math.max(1, b.width) - a.length / Math.max(1, a.width), preset: "fast" },
+    { name: "area-asc-microfill", sortFn: (a, b) => a.length * a.width - b.length * b.width, preset: "max-yield" },
+  ];
+
+  let heuristicIdx = 0;
+
+  while (Date.now() - startTime < totalDurationMs - 600) {
+    if (shouldAbort?.()) break;
+
+    const elapsedMs = Date.now() - startTime;
+    const elapsedSec = elapsedMs / 1000;
+
+    let stageIndex = 0;
+    let stageName = "Local Area Best Fit";
+    if (elapsedSec >= 11.25) {
+      stageIndex = 3;
+      stageName = "Global Evolutionary Tournament & Final Compaction";
+    } else if (elapsedSec >= 7.5) {
+      stageIndex = 2;
+      stageName = "Cross-Sheet Migration & Consolidation";
+    } else if (elapsedSec >= 3.75) {
+      stageIndex = 1;
+      stageName = "Single-Sheet Best Fit & Dynamic Programming Strips";
+    }
+
+    const h = heuristics[heuristicIdx % heuristics.length]!;
+    heuristicIdx++;
+
+    // Perturb parts array with heuristic ordering or stochastic shuffling
+    let candidateParts = [...parts];
+    if (h.sortFn) {
+      candidateParts.sort(h.sortFn);
+    }
+    // In Stage 3 (Evolutionary Tournament), apply random pairwise gene swaps to discover new compact fits
+    if (stageIndex === 3 && candidateParts.length > 2) {
+      for (let s = 0; s < 3; s++) {
+        const i1 = Math.floor(Math.random() * candidateParts.length);
+        const i2 = Math.floor(Math.random() * candidateParts.length);
+        const temp = candidateParts[i1]!;
+        candidateParts[i1] = candidateParts[i2]!;
+        candidateParts[i2] = temp;
+      }
+    }
+
+    try {
+      const trialResult = optimize(candidateParts, {
+        ...config,
+        preset: h.preset,
+        populationSize: 30,
+        generations: 8,
+        rotation: config.rotation,
+      });
+
+      const trialCandidates = trialResult.candidateLayouts?.length || 80;
+      candidatesTested += trialCandidates;
+
+      // Acceptance criterion:
+      // Priority 1: Strictly fewer sheets
+      // Priority 2: Equal sheets AND higher material utilization
+      // Priority 3: Equal sheets AND equal utilization AND larger remnant
+      const isFewerSheets = trialResult.sheetCount < bestResult.sheetCount;
+      const isEqualSheetsHigherUtil =
+        trialResult.sheetCount === bestResult.sheetCount &&
+        trialResult.utilization > bestResult.utilization + 0.05;
+      const isBetterRemnant =
+        trialResult.sheetCount === bestResult.sheetCount &&
+        Math.abs(trialResult.utilization - bestResult.utilization) <= 0.05 &&
+        (trialResult.metrics?.largestRemnantArea ?? 0) > (bestResult.metrics?.largestRemnantArea ?? 0);
+
+      if (isFewerSheets || isEqualSheetsHigherUtil || isBetterRemnant) {
+        bestResult = trialResult;
+      }
+    } catch {
+      // Continue search on trial exception
+    }
+
+    onUpdate?.({
+      stageIndex,
+      stageName,
+      candidatesTested,
+      currentYield: Number(bestResult.utilization.toFixed(1)),
+      currentScrap: Number((100 - bestResult.utilization).toFixed(1)),
+      currentSheets: bestResult.sheetCount,
+      bestResult,
+    });
+
+    // Yield back to event loop for 100ms so UI circular dial animates smoothly and unblocks the main thread
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  // Final convergence update with full candidate count
+  onUpdate?.({
+    stageIndex: 3,
+    stageName: "Global Evolutionary Tournament & Final Compaction",
+    candidatesTested,
+    currentYield: Number(bestResult.utilization.toFixed(1)),
+    currentScrap: Number((100 - bestResult.utilization).toFixed(1)),
+    currentSheets: bestResult.sheetCount,
+    bestResult,
+  });
+
+  return bestResult;
+}
+

@@ -1,0 +1,25 @@
+import {
+  packBlockClusterSheet,
+  evaluateLayoutScore,
+  DEFAULT_SCORING_WEIGHTS
+} from "../src/lib/nesting.ts";
+
+const PARTS_6MM = [
+  { id:"P010", item:"CL-501", description:"Cleat plate", material:"IS2062 E250A", thickness:6, length:150, width:150, qty:96, invalid:null },
+  { id:"P011", item:"CL-502", description:"Shear cleat", material:"IS2062 E250A", thickness:6, length:260, width:180, qty:64, invalid:null },
+  { id:"P018", item:"WP-905", description:"Walkway plate", material:"IS2062 E250A", thickness:6, length:340, width:120, qty:72, invalid:null },
+  { id:"P019", item:"WP-906", description:"Handrail base", material:"IS2062 E250A", thickness:6, length:120, width:120, qty:120, invalid:null },
+];
+
+const config = { sheetLength: 6000, sheetWidth: 1250, kerf: 3, trim: 0, rotation: true, preset: "balanced" };
+const queue = [];
+for (const p of PARTS_6MM) {
+  for (let q = 0; q < p.qty; q++) {
+    queue.push({ part: p, w: p.length, h: p.width, rotated: false });
+  }
+}
+
+const blockShelf = packBlockClusterSheet(queue, 6000, 1250, config, "IS2062", 6, "shelves", "BLOCK-S");
+const weights = DEFAULT_SCORING_WEIGHTS.balanced;
+const scoreShelf = evaluateLayoutScore(blockShelf, weights, config);
+console.log(`BlockShelf: sheets=${blockShelf.length}, util=${blockShelf.map(s => s.utilization.toFixed(1) + '%').join(' / ')}, score=${scoreShelf.score}`);
